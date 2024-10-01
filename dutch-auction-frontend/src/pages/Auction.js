@@ -1,77 +1,132 @@
 import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Button, Alert } from 'react-bootstrap';
+import { connectMetaMask, getContract, listenForAccountChanges, listenForNetworkChanges } from '../utils/ethereum';
+import { ethers } from 'ethers';
+import DutchAuctionABI from '../contracts/DutchAuction.json'; // Make sure this path is correct
+
+const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS;
 
 const Auction = () => {
-  const [currentPrice, setCurrentPrice] = useState(1); // Starting price in ETH
-  const [timeLeft, setTimeLeft] = useState(1200); // 20 minutes in seconds
-  const [auctionEnded, setAuctionEnded] = useState(false);
+  const [currentPrice, setCurrentPrice] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [contract, setContract] = useState(null);
+  const [account, setAccount] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft(prevTime => {
-        if (prevTime <= 1) {
-          clearInterval(timer);
-          setAuctionEnded(true);
-          return 0;
+    const init = async () => {
+      try {
+        const result = await connectMetaMask();
+        if (result && result.signer && result.address) {
+          setAccount(result.address);
+          const auctionContract = getContract(CONTRACT_ADDRESS, DutchAuctionABI.abi, result.signer);
+          setContract(auctionContract);
+          await updateAuctionInfo(auctionContract);
+        } else {
+          setError("Failed to connect to MetaMask. Please make sure it's installed and unlocked.");
         }
-        return prevTime - 1;
-      });
-    }, 1000);
+      } catch (err) {
+        console.error("Error in init:", err);
+        setError("An error occurred while initializing the auction.");
+      }
+    };
+    init();
 
-    return () => clearInterval(timer);
+    listenForAccountChanges((newAccount) => {
+      setAccount(newAccount);
+      init(); // Reinitialize with new account
+    });
+
+    listenForNetworkChanges(() => {
+      init(); // Reinitialize on network change
+    });
+
+    // Set up interval to update auction info
+    const intervalId = setInterval(() => {
+      if (contract) {
+        updateAuctionInfo(contract);
+      }
+    }, 10000); // Update every 10 seconds
+
+    return () => clearInterval(intervalId);
   }, []);
 
-  useEffect(() => {
-    const priceInterval = setInterval(() => {
-      setCurrentPrice(prevPrice => {
-        if (prevPrice > 0.1) {
-          return prevPrice - 0.05;
-        }
-        clearInterval(priceInterval);
-        return prevPrice;
-      });
-    }, 10000); // Decrease price every 10 seconds
+  const updateAuctionInfo = async (auctionContract) => {
+    try {
+      const price = await auctionContract.retrieveCurrentPrice();
+      setCurrentPrice(ethers.formatEther(price));
+      
+      const timeElapsed = await auctionContract.retrieveTimeElapsed();
+      setTimeLeft(Math.max(0, 1200 - timeElapsed * 60)); // Assuming 20 minutes auction time
+    } catch (error) {
+      console.error('Error updating auction info:', error);
+      setError("Failed to update auction information.");
+    }
+  };
 
-    return () => clearInterval(priceInterval);
-  }, []);
-
-  const formatTime = (seconds) => {
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = seconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  const placeBid = async () => {
+    if (contract && account) {
+      setIsLoading(true);
+      try {
+        const tx = await contract.addBidder({ value: ethers.parseEther(currentPrice) });
+        await tx.wait();
+        alert('Bid placed successfully!');
+        await updateAuctionInfo(contract);
+      } catch (error) {
+        console.error('Error placing bid:', error);
+        setError("Failed to place bid. Please try again.");
+      } finally {
+        setIsLoading(false);
+      }
+    }
   };
 
   return (
     <Container className="mt-5">
       <Row className="justify-content-md-center">
         <Col md={8}>
-          <h2 className="mb-4 text-center">Dutch Auction in Progress</h2>
+          {error && (
+            <Alert variant="danger" className="mb-4">
+              {error}
+            </Alert>
+          )}
+          <Card className="text-center mb-4">
+            <Card.Body>
+              <Card.Title>Current Price</Card.Title>
+              <Card.Text className="display-4">{currentPrice} ETH</Card.Text>
+            </Card.Body>
+          </Card>
           
           <Card className="text-center mb-4">
             <Card.Body>
               <Card.Title>Time Remaining</Card.Title>
-              <Card.Text className="display-4">{formatTime(timeLeft)}</Card.Text>
+              <Card.Text className="display-4">
+                {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+              </Card.Text>
             </Card.Body>
           </Card>
-          
-          <Alert variant="info" className="mb-4">
-            <Alert.Heading>Current Price: {currentPrice.toFixed(2)} ETH</Alert.Heading>
-          </Alert>
           
           <div className="d-grid gap-2">
             <Button 
               variant="primary" 
               size="lg" 
-              disabled={auctionEnded}
-              onClick={() => alert('Implement buy functionality')}
+              onClick={placeBid}
+              disabled={!account || timeLeft === 0 || isLoading}
             >
-              {auctionEnded ? 'Auction Ended' : 'Buy Token'}
+              {isLoading ? 'Processing...' : 'Place Bid'}
             </Button>
           </div>
 
-          {auctionEnded && (
+          {!account && (
             <Alert variant="warning" className="mt-4">
-              The auction has ended. No more purchases can be made.
+              Please connect your MetaMask wallet to participate in the auction.
+            </Alert>
+          )}
+
+          {account && (
+            <Alert variant="info" className="mt-4">
+              Connected Account: {account}
             </Alert>
           )}
         </Col>
