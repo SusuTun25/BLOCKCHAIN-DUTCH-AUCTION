@@ -1,19 +1,52 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
-import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Context.sol";
+pragma solidity ^0.8.0;
 
-contract ERC20Token is Context, ERC20, Ownable {
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+// ERC20 Token Contract
+contract Token is ERC20 {
+    // Constructor to initialize the token with a name, ticker, and initial supply
     constructor(
-        uint256 initialSupply,
-        address contractAddress
-    ) Ownable(msg.sender) ERC20("ERC20Token", "ET") {
-        _mint(msg.sender, initialSupply * (10 ** 18));
-        approve(contractAddress, initialSupply * (10 ** 18));
+        string memory name,
+        string memory ticker,
+        uint256 initialSupply
+    ) ERC20(name, ticker) {
+        _mint(msg.sender, initialSupply); // Mint the initial supply to the deployer's address
     }
 
-    function burn(address i_owner, uint256 amount) public onlyOwner {
-        _burn(i_owner, amount * 10 ** 18);
+    // Function to burn tokens from a specific account
+    function burn(address account, uint256 amount) external {
+        _burn(account, amount); // Burn the specified amount of tokens from the account
+    }
+}
+
+// Token Factory Contract
+contract TokenFactory {
+    address[] public deployedTokens; // Array to track deployed token addresses
+    uint256 public tokenCount; // Counter for the number of tokens deployed
+
+    // Event to signal the deployment of a new token
+    event TokenDeployed(address indexed tokenAddress);
+
+    // Function to deploy a new token
+    function deployToken(
+        string calldata name,
+        string calldata ticker,
+        uint256 initialSupply
+    ) public returns (address) {
+        // Create a new Token instance
+        Token token = new Token(name, ticker, initialSupply);
+        
+        // Transfer the entire supply to the deployer
+        token.transfer(msg.sender, initialSupply);
+        
+        // Store the token address
+        deployedTokens.push(address(token));
+        tokenCount++; // Increment the total token count
+        
+        // Emit the TokenDeployed event
+        emit TokenDeployed(address(token));
+        
+        return address(token); // Return the address of the newly created token
     }
 }

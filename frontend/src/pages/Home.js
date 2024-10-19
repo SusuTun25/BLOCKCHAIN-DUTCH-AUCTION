@@ -46,7 +46,7 @@ const Home = () => {
           )}
           <div>
             <Button as={Link} to="/auction" variant="secondary" size="lg">
-              View Auction
+              View All Auction
             </Button>
           </div>
         </Col>

@@ -1,86 +1,137 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Button, Alert } from 'react-bootstrap';
-import { connectMetaMask, getContract, listenForAccountChanges, listenForNetworkChanges } from '../utils/ethereum';
+import { useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { ethers } from 'ethers';
-import DutchAuctionABI from '../contracts/DutchAuction.json'; // Make sure this path is correct
+import { Container, Row, Col, Card, Button, Alert } from 'react-bootstrap';
+import { convertUnixTimeToMinutes, listenForAccountChanges, listenForNetworkChanges } from '../utils/ethereum';
+import DutchAuction from '../abis/DutchAuction.json'; // Make sure this path is correct
+import token from '../abis/Token.json'
+import { useAuctionContext } from '../components/AuctionContext';
 
 const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS;
 
 const Auction = () => {
+  const { auctionAddress, tokenAdd} = useAuctionContext();
   const [currentPrice, setCurrentPrice] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
-  const [contract, setContract] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [account, setAccount] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const currentTime = Math.floor(Date.now() / 1000);
+  const [count, setCount] = useState(0);
+  const [auction, setAuction] = useState({
+    tokenAdd: '',
+    tokenName: '',
+    tokenTicker: '',
+    sellerAdd: '',
+    startedOn: 'NaN',
+    tokenQty: '',
+    startingPrice: '',
+    reservePrice: 'NaN',
+    currentPrice: 'NaN',
+    placeBidTimeRemaining: 'NaN',
+    revealAtTimeRemaining: 'NaN',
+    status: 0,
+  });
+
+  const testaddress = '0xcf170D09600BAC7cea8a2AA369281f1970a44ACF'
 
   useEffect(() => {
-    const init = async () => {
+    async function getAuctionInfo() {
       try {
-        const result = await connectMetaMask();
-        if (result && result.signer && result.address) {
-          setAccount(result.address);
-          const auctionContract = getContract(CONTRACT_ADDRESS, DutchAuctionABI.abi, result.signer);
-          setContract(auctionContract);
-          await updateAuctionInfo(auctionContract);
-        } else {
-          setError("Failed to connect to MetaMask. Please make sure it's installed and unlocked.");
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+        const dutchAuctionContract = new ethers.Contract(testaddress, DutchAuction.abi, signer);
+        console.log(testaddress);
+        // Token info
+        const tokenAdd = await dutchAuctionContract.token();
+        const tokenContract = new ethers.Contract(tokenAdd, token.abi, signer);
+        console.log(tokenAdd);
+        const tokenName = await tokenContract.name();
+        const tokenTicker = await tokenContract.symbol();
+
+        // Auction info
+        const seller = await dutchAuctionContract.seller();
+        const tokenQty = await dutchAuctionContract.tokenQty();
+        const startingPrice = await dutchAuctionContract.startingPrice();  
+        console.log(startingPrice);
+        const reservePrice = await dutchAuctionContract.getReservePrice();
+
+        const auctionStatus = await dutchAuctionContract.auctionStatusPred(currentTime);
+        const newAuction = {
+          ...auction,
+          tokenAdd: tokenAdd,
+          tokenName: tokenName,
+          tokenTicker: tokenTicker,
+          sellerAdd: seller,
+          tokenQty: tokenQty,
+          startingPrice: startingPrice,
+          reservePrice: reservePrice,
+          status: auctionStatus,
+        };
+
+        if (auctionStatus !== 0) {
+          const startAt = parseInt((await dutchAuctionContract.startAt())._hex);
+          const startedOn = new Date(startAt * 1000).toLocaleString();
+          newAuction.startedOn = startedOn;
         }
-      } catch (err) {
-        console.error("Error in init:", err);
-        setError("An error occurred while initializing the auction.");
+
+        if (auctionStatus === 1) {
+          const revealAt = parseInt((await dutchAuctionContract.revealAt())._hex);
+          const placeBidTimeRemaining = Math.max(revealAt - currentTime, 0);
+          newAuction.placeBidTimeRemaining = convertUnixTimeToMinutes(placeBidTimeRemaining);
+
+          const currentPrice = await dutchAuctionContract.getPrice(currentTime);
+          newAuction.currentPrice = currentPrice;
+        }
+
+        if (auctionStatus === 2) {
+          newAuction.currentPrice = reservePrice;
+          newAuction.placeBidTimeRemaining = convertUnixTimeToMinutes(0);
+          const endAt = parseInt((await dutchAuctionContract.endAt())._hex);
+          const revealAtTimeRemaining = Math.max(endAt - currentTime, 0);
+          newAuction.revealAtTimeRemaining = convertUnixTimeToMinutes(revealAtTimeRemaining);
+        }
+
+        if (auctionStatus === 3) {
+          newAuction.revealAtTimeRemaining = convertUnixTimeToMinutes(0);
+        }
+
+        setAuction(newAuction);
+      } catch (error){
+        console.log(error)
       }
     };
-    init();
-
-    listenForAccountChanges((newAccount) => {
-      setAccount(newAccount);
-      init(); // Reinitialize with new account
-    });
-
-    listenForNetworkChanges(() => {
-      init(); // Reinitialize on network change
-    });
 
     // Set up interval to update auction info
-    const intervalId = setInterval(() => {
-      if (contract) {
-        updateAuctionInfo(contract);
-      }
-    }, 10000); // Update every 10 seconds
+    setInterval(() => {
+      setCount(count + 1);
+    }, 100000000);
+    getAuctionInfo();
 
-    return () => clearInterval(intervalId);
   }, []);
 
-  const updateAuctionInfo = async (auctionContract) => {
-    try {
-      const price = await auctionContract.retrieveCurrentPrice();
-      setCurrentPrice(ethers.formatEther(price));
-      
-      const timeElapsed = await auctionContract.retrieveTimeElapsed();
-      setTimeLeft(Math.max(0, 1200 - timeElapsed * 60)); // Assuming 20 minutes auction time
-    } catch (error) {
-      console.error('Error updating auction info:', error);
-      setError("Failed to update auction information.");
-    }
-  };
+  async function startAuction() {
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const signer = await provider.getSigner();
+    const dutchAuctionContract = new ethers.Contract(auctionAddress, DutchAuction.abi, signer);
+    setLoading(true);
+    const startAucTx = await dutchAuctionContract.startAuction();
+    await startAucTx.wait();
+    setLoading(false);
+    window.location.reload();
+  }
 
-  const placeBid = async () => {
-    if (contract && account) {
-      setIsLoading(true);
-      try {
-        const tx = await contract.addBidder({ value: ethers.parseEther(currentPrice) });
-        await tx.wait();
-        alert('Bid placed successfully!');
-        await updateAuctionInfo(contract);
-      } catch (error) {
-        console.error('Error placing bid:', error);
-        setError("Failed to place bid. Please try again.");
-      } finally {
-        setIsLoading(false);
-      }
-    }
-  };
+  // const [bidAmount, setBidAmount] = useState();
+  // async function placeBid() {
+  //   const submarineAddresss = await createSubmarineContract(auction.currentPrice);
+  //   console.log(submarineAddresss);
+  //   dispatch(accountBidded(currentAccountAddress, auctionAddress, submarineAddresss));
+  //   await sendEthertoSubmarine(submarineAddresss, bidAmount);
+  //   const submarineBalance = await getSubmarineBalance(submarineAddresss);
+  //   console.log(submarineBalance);
+  // }
 
   return (
     <Container className="mt-5">
@@ -94,7 +145,7 @@ const Auction = () => {
           <Card className="text-center mb-4">
             <Card.Body>
               <Card.Title>Current Price</Card.Title>
-              <Card.Text className="display-4">{currentPrice} ETH</Card.Text>
+              <Card.Text className="display-4">{auction.startingPrice} </Card.Text>
             </Card.Body>
           </Card>
           
@@ -111,7 +162,7 @@ const Auction = () => {
             <Button 
               variant="primary" 
               size="lg" 
-              onClick={placeBid}
+              // onClick={placeBid}
               disabled={!account || timeLeft === 0 || isLoading}
             >
               {isLoading ? 'Processing...' : 'Place Bid'}

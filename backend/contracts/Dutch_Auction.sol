@@ -1,393 +1,289 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.21;
+pragma solidity ^0.8.0;
 
+import "hardhat/console.sol"; // For debugging purposes, can be removed in production
 
-import "./Token.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+interface IERC20 {
+    function totalSupply() external view returns (uint256);
+    function balanceOf(address account) external view returns (uint256);
+    function transfer(address recipient, uint256 amount) external returns (bool);
+    function allowance(address owner, address spender) external view returns (uint256);
+    function approve(address spender, uint256 amount) external returns (bool);
+    function transferFrom(address sender, address recipient, uint256 amount) external returns (bool);
+    function burn(address account, uint256 amount) external;
+}
 
-error Dutch_Auction__NotOwner();
-error Dutch_Auction__IsOwner();
-error Dutch_Auction__NotOpen();
-error Dutch_Auction__Open();
+interface IBidder {
+    function timestamp() external view returns (uint);
+    function currentPrice() external view returns (uint);
+    function getOwner() external view returns (address);
+    function getBalance() external view returns (uint);
+    function sendToOwner(uint amount) external payable;
+    function sendToAccount(address payable account, uint amount) external payable;
+}
 
-contract Dutch_Auction is ReentrancyGuard {
-    int256 private currentPrice; //in wei
-    uint256 private totalNumBidders = 0;
-    uint256 private immutable startPrice; //in wei
-    uint256 private immutable reservePrice;
-    address private immutable i_owner;
-    uint256 private totalAlgosAvailable;
-    uint256 private startTime;
-    uint256 private constant AUCTION_TIME = 1200; //in seconds
-    uint256 private currentUnsoldAlgos;
-    uint256 private changePerMin;
-    bool private prematureEnd = false;
-    bool internal lock = false;
-    bool internal attacked = false;
+contract DutchAuction {
+    // Auction durations
+    uint public constant AUCTION_DURATION = 20 minutes;
+    uint public constant REVEAL_DURATION = 10 minutes;
 
-    ERC20Token private DAToken; //importing Token
-    address private ERC20ContractAddress;
-    mapping(uint256 => Bidder) public biddersList; //to be made private later <for debugging purposes>
+    // Auction parameters
+    IERC20 public immutable token;
+    uint public immutable tokenQty;
+    uint public immutable tokenId;
 
-    struct Bidder {
-        uint256 bidderID;
-        address walletAddress;
-        uint256 bidValue; //the value they paid to the contract to purchase the algo
-        uint256 totalAlgosPurchased;
-        uint256 refundEth;
-        bool isExist;
-        bool tokenSent;
-        bool ethRefunded;
+    address payable public immutable seller;
+    uint public immutable startingPrice;
+    uint public immutable discountRate;
+
+    // Auction state variables
+    uint public startAt;
+    uint public revealAt;
+    uint public endAt;
+    bool public distributed;
+
+    enum Status { NotStarted, Active, Revealing, Distributing, Ended }
+    Status private status;
+
+    // Token net worth pools
+    uint private tokenNetWorthPool;
+    uint private currentBidNetWorthPool;
+
+    // Bidders tracking
+    address[] private bidderList;
+    mapping(address => bool) private seenBidders;
+
+    // Events
+    event AuctionCreated(address indexed seller, address indexed token, uint qty, uint startPrice, uint discountRate);
+    event StartOfAuction();
+    event DepositTokens(address indexed from, uint qty);
+    event LogBid(address indexed from, uint price);
+    event EndCommitStage();
+    event EndRevealStage();
+    event EndDistributingStage();
+    event SuccessfulBid(address indexed bidder, uint qtyAllocated, uint refund);
+
+    // Modifiers
+    modifier onlyNotSeller() {
+        require(msg.sender != seller, "The seller cannot perform this action");
+        _;
     }
 
-    // Variable to indicate auction's state --> type declaration
-    enum AuctionState {
-        OPEN,
-        CLOSING
-    } // uint256 0: OPEN, 1: CLOSED
-
-    AuctionState private s_auctionState;
-
-    /*Constructor*/
-    constructor(uint256 _reservePrice, uint256 _startPrice) {
-        require(
-            _reservePrice < _startPrice,
-            "reserve price is higher than current price"
-        );
-        i_owner = msg.sender;
-        reservePrice = _reservePrice;
-        currentPrice = int256(_startPrice);
-        startPrice = _startPrice;
-        startTime = 0;
-        s_auctionState = AuctionState.CLOSING;
+    modifier onlySeller() {
+        require(msg.sender == seller, "Only the seller can perform this action");
+        _;
     }
 
-    /* modifiers */
-    modifier onlyOwner() {
-        // require(msg.sender == owner);
-        if (msg.sender != i_owner) revert Dutch_Auction__NotOwner();
-        _; //do the rest of the function
+    modifier onlyNotStarted() {
+        require(status == Status.NotStarted, "This auction has already started");
+        _;
     }
 
-    modifier notOwner() {
-        // require(msg.sender == owner);
-        if (msg.sender == i_owner) revert Dutch_Auction__IsOwner();
-        _; //do the rest of the function
+    modifier onlyActive() {
+        require(status == Status.Active, "This auction is no longer active");
+        _;
     }
 
-    modifier AuctionOpen() {
-        // require(msg.sender == owner);
-        if (AuctionState.CLOSING == s_auctionState)
-            revert Dutch_Auction__NotOpen();
-        _; //do the rest of the function
+    modifier onlyRevealing() {
+        require(status == Status.Revealing, "This auction is not in revealing stage");
+        _;
     }
 
-    modifier AuctionClosed() {
-        // require(msg.sender == owner);
-        if (AuctionState.OPEN == s_auctionState) revert Dutch_Auction__Open();
-        _; //do the rest of the function
+    modifier onlyDistributing() {
+        require(status == Status.Distributing, "This auction is not in distributing stage");
+        _;
     }
 
-    event startAuctionEvent(
-        uint256 startTime,
-        address ERC20Address,
-        uint256 totalAlgosAvailable,
-        uint256 changePerMin
-    );
-    event addBidderEvent(
-        uint256 bidderID,
-        address walletAddress,
-        uint256 bidvalue
-    );
-
-    event updateCurrentPriceEvent(uint256 timeElapsed, uint256 currentprice);
-
-    event sendTokenEvent(address bidderAddress, uint256 tokensSent);
-    
-    event calculateEvent(
-        address bidderAddress,
-        uint256 TokensPurchased,
-        uint256 refundValue
-    );
-
-    event RefundEvent(
-        address bidderAddress,
-        uint256 TokensPurchased,
-        uint256 refundValue
-    );
-
-    event endAuctionEvent(
-        uint256 totalBidders,
-        uint256 burntERC20,
-        uint totalETHEarned
-    );
-
-    function startAuction(
-        uint256 _totalAlgosAvailable,
-        uint256 _changePerMin
-    ) public onlyOwner AuctionClosed () {
-        s_auctionState = AuctionState.OPEN;
-        totalAlgosAvailable = _totalAlgosAvailable;
-        changePerMin = _changePerMin;
-        currentPrice = int256(startPrice);
-        currentUnsoldAlgos = _totalAlgosAvailable;
-        totalNumBidders = 0;
-        startTime = block.timestamp; //Start time of when the contract is deployed
-        DAToken = new ERC20Token(totalAlgosAvailable, address(this));
-        ERC20ContractAddress = address(DAToken);
-        emit startAuctionEvent(
-            startTime,
-            ERC20ContractAddress,
-            totalAlgosAvailable,
-            changePerMin
-        );
+    modifier onlyEnded() {
+        require(status == Status.Ended, "This auction is not ended");
+        _;
     }
 
-    /**
-     * public functions
-     *
-     * */
+    // Constructor
+    constructor(
+        address _seller,
+        uint _startingPrice,
+        uint _discountRate,
+        address _token,
+        uint _tokenQty,
+        uint _tokenId
+    ) {
+        seller = payable(_seller);
+        startingPrice = _startingPrice;
+        discountRate = _discountRate;
+        token = IERC20(_token);
+        tokenQty = _tokenQty;
+        tokenId = _tokenId;
 
-    function addBidder() public payable notOwner AuctionOpen {
-        //checking all the requirements
-        require(msg.value > 0, "bidValue less than 0");
+        require(_startingPrice >= _discountRate * AUCTION_DURATION, "Starting price is too low");
 
-        calculate();
-        require(msg.value > uint256(currentPrice), "bidValue less than current price");
-        require(block.timestamp - startTime < AUCTION_TIME, "time is up");
-        require(currentUnsoldAlgos > 0, "There is no more algos left");
+        tokenNetWorthPool = (startingPrice * tokenQty) / 10 ** 18;
+        status = Status.NotStarted;
 
-        // Adding or Updating the bidders currently in the contract
-        Bidder storage newBidder = biddersList[totalNumBidders];
-        newBidder.bidderID = totalNumBidders;
-        newBidder.walletAddress = msg.sender;
-        newBidder.bidValue = msg.value;
-        newBidder.isExist = true;
-        newBidder.totalAlgosPurchased = 0;
-        newBidder.refundEth = 0;
-        newBidder.tokenSent = false;
-        newBidder.ethRefunded = false;
-        biddersList[totalNumBidders] = newBidder;
-        emit addBidderEvent(
-            newBidder.bidderID,
-            newBidder.walletAddress,
-            newBidder.bidValue
-        );
-        totalNumBidders++;
-        calculate(); //calculate again in case the tokens are run out 
+        emit AuctionCreated(seller, _token, tokenQty, startingPrice, discountRate);
     }
 
-    function updateCurrentPrice() public {
-        if (!prematureEnd){
-        currentPrice =
-            int256(startPrice) -
-            int256((block.timestamp - startTime) / 60) *
-            int256(changePerMin);
+    // Start the auction
+    function startAuction() external onlySeller onlyNotStarted {
+        injectTokens();
+        require(tokenQty == token.balanceOf(address(this)), "Not enough tokens injected");
 
-        if (currentPrice <= 0 || currentPrice <= int256(reservePrice)) {
-            currentPrice = int256(reservePrice);
+        startAt = block.timestamp;
+        revealAt = startAt + AUCTION_DURATION;
+        endAt = revealAt + REVEAL_DURATION;
+        status = Status.Active;
+
+        emit StartOfAuction();
+    }
+
+    // Inject tokens into the auction
+    function injectTokens() internal onlySeller onlyNotStarted {
+        token.transferFrom(msg.sender, address(this), tokenQty);
+        emit DepositTokens(msg.sender, tokenQty);
+    }
+
+    // Get current price of the token
+    function getPrice(uint time_now) public view returns (uint) {
+        if (status == Status.NotStarted) return startingPrice;
+        if (status != Status.Active) return getReservePrice();
+
+        uint timeElapsed = time_now - startAt;
+        uint discount = discountRate * timeElapsed;
+        return startingPrice - discount;
+    }
+
+    // Get the current token net worth
+    function getCurrentTokenNetWorth(uint time_now) internal view returns (uint) {
+        uint currentPrice = getPrice(time_now);
+        return (currentPrice * tokenQty) / 10 ** 18;
+    }
+
+    // End the commit stage
+    function endCommitStage() public onlyActive {
+        status = Status.Revealing;
+        emit EndCommitStage();
+    }
+
+    // End the reveal stage
+    function endRevealStage() public onlyRevealing {
+        status = Status.Distributing;
+        emit EndRevealStage();
+    }
+
+    // End the distribution stage
+    function endDistributingStage() public onlyDistributing {
+        distributed = true;
+        status = Status.Ended;
+        emit EndDistributingStage();
+    }
+
+    // Get reserve price
+    function getReservePrice() public view returns (uint) {
+        return startingPrice - (AUCTION_DURATION * discountRate);
+    }
+
+    // Predict auction status based on the current time
+    function auctionStatusPred(uint time_now) public view returns (Status) {
+        if (startAt == 0) return Status.NotStarted;
+        if (time_now >= startAt && time_now < revealAt) return Status.Active;
+        if (time_now >= revealAt && time_now < endAt) return Status.Revealing;
+        return distributed ? Status.Ended : Status.Distributing;
+    }
+
+    // Add a bidder to the list
+    function addBidderToList(address _bidder) external {
+        if (status == Status.Active) {
+            endCommitStage();
+        } else if (status != Status.Revealing) {
+            return;
         }
-        emit updateCurrentPriceEvent(
-            (block.timestamp - startTime),
-            uint256(currentPrice)
-        );
-        }
-    }
+        bidderList.push(_bidder);
 
-    function sendTokens() public onlyOwner AuctionClosed {
-        for (uint i = 0; i < totalNumBidders; i++) {
-            if (biddersList[i].totalAlgosPurchased > 0 && !biddersList[i].tokenSent) {
-                uint256 totalAlgos = biddersList[i].totalAlgosPurchased;
-                DAToken.approve(
-                    biddersList[i].walletAddress,
-                    totalAlgos * 10 ** 18
-                );
-                DAToken.transferFrom(
-                    address(this),
-                    biddersList[i].walletAddress,
-                    totalAlgos * 10 ** 18
-                );
-                emit sendTokenEvent(
-                    biddersList[i].walletAddress,
-                    totalAlgos
-                );
-                biddersList[i].tokenSent = true;
+        // Sort bidders by timestamp
+        for (uint i = bidderList.length - 1; i > 0; i--) {
+            IBidder bidder = IBidder(bidderList[i]);
+            IBidder prevBidder = IBidder(bidderList[i - 1]);
 
+            if (bidder.timestamp() < prevBidder.timestamp()) {
+                address temp = bidderList[i - 1];
+                bidderList[i - 1] = bidderList[i];
+                bidderList[i] = temp;
+            } else {
+                break;
             }
         }
     }
 
-    function refundETH() public onlyOwner AuctionClosed {
-        require(!lock, "Lock is held by the contract");
-        lock = true;
-        for (uint i = 0; i < totalNumBidders; i++) {
-            if (
-                biddersList[i].refundEth > 0 &&
-                address(this).balance > biddersList[i].refundEth
-            ) {
-                //refundETH
-                uint256 sendValue = biddersList[i].refundEth;
-                biddersList[i].refundEth = 0; // re-entrancy attack prevention
-                if (sendValue>0 && address(this).balance>sendValue){
-                (bool callSuccess, ) = payable(biddersList[i].walletAddress)
-                    .call{value: sendValue}("");
-                require(callSuccess, "Failed to send ether"); 
-                }
-                emit RefundEvent(
-                    biddersList[i].walletAddress,
-                    biddersList[i].totalAlgosPurchased,
-                    sendValue
-                );
-                sendValue = 0; 
-                
-
-            }
-        }
-        lock = false;
+    // Get the list of bidder
+    function getBidderList() public view returns (address[] memory) {
+        return bidderList;
     }
 
-    function calculate() public {
-        updateCurrentPrice();
-        uint256 currentAlgos = totalAlgosAvailable;
-        for (uint i = 0; i < totalNumBidders; i++) {
-            //if there is sufficient algos for this current bidder
-            if (
-                currentAlgos >= biddersList[i].bidValue / uint256(currentPrice)
-            ) {
-                biddersList[i].totalAlgosPurchased =
-                    biddersList[i].bidValue /
-                    uint256(currentPrice);
-                currentAlgos -= biddersList[i].bidValue / uint256(currentPrice);
-                biddersList[i].refundEth = 0;
+    // Distribute tokens to bidders
+    function distributeToken() public payable onlyRevealing {
+        endRevealStage();
+        uint currentTokenNetWorth;
+        uint currentBidNetWorth;
+        uint finalPrice = startingPrice;
+        bool exceededWorth = false;
+
+        for (uint i = 0; i < bidderList.length; i++) {
+            IBidder bidder = IBidder(bidderList[i]);
+            address bidderAddress = bidder.getOwner();
+            if (seenBidders[bidderAddress]) continue;
+
+            seenBidders[bidderAddress] = true;
+            uint bidderBalance = bidder.getBalance();
+            currentTokenNetWorth = (bidder.currentPrice() * tokenQty) / 10 ** 18;
+            currentBidNetWorth += bidderBalance;
+
+            if (!exceededWorth) {
+                finalPrice = bidder.currentPrice();
+            } else {
+                bidder.sendToOwner(bidderBalance);
+                continue;
             }
-            //Else if there is algos left but it is less than the amount the bidder bidded
-            // he gets all the remaining algos and is refunded the ETH.
-            else if (
-                currentAlgos > 0 &&
-                currentAlgos < biddersList[i].bidValue / uint256(currentPrice)
-            ) {
-                biddersList[i].totalAlgosPurchased = currentAlgos;
-                currentAlgos = 0;
-                biddersList[i].refundEth =
-                    biddersList[i].bidValue -
-                    biddersList[i].totalAlgosPurchased *
-                    uint256(currentPrice);
-            }
-            //there is no algos left
-            // reset the total algos purchased to 0
-            else if (currentAlgos <= 0) {
-                //refund for the rest
-                biddersList[i].totalAlgosPurchased = 0;
-                biddersList[i].refundEth = biddersList[i].bidValue;
+
+            if (currentBidNetWorth >= currentTokenNetWorth) {
+                uint refund = currentBidNetWorth - currentTokenNetWorth;
+                bidder.sendToOwner(refund);
+                exceededWorth = true;
             }
         }
 
-        if (currentAlgos > 0) {
-            currentUnsoldAlgos = currentAlgos;
-        } else {
-            s_auctionState = AuctionState.CLOSING;
-            currentUnsoldAlgos = 0;
-            prematureEnd = true;
-        }
-    }
+        uint tokenQtyLeft = tokenQty;
+        for (uint i = 0; i < bidderList.length; i++) {
+            if (tokenQtyLeft <= 0) break;
 
-    function endAuction() public onlyOwner {
-        s_auctionState = AuctionState.CLOSING;
-        calculate();
-        sendTokens();
-        refundETH();
-        if (currentUnsoldAlgos > 0) {
-            DAToken.burn(address(this), currentUnsoldAlgos);
-        }
-        emit endAuctionEvent(
-            totalNumBidders,
-            currentUnsoldAlgos,
-            address(this).balance
-        );
-    }
+            IBidder bidder = IBidder(bidderList[i]);
+            uint bidderBalance = bidder.getBalance();
+            uint qty = (bidderBalance * 10 ** 18) / finalPrice;
 
-    /**View and Pure Function */
+            // Send token to bidder
+            console.log("qty left %s", tokenQtyLeft);
+            console.log("transfer %s to %s", qty, bidder.getOwner());
+            console.log("account balance %s", token.balanceOf(address(this)));
+            console.log("Bidder balance %s", bidderBalance);
+            console.log("final price %s", finalPrice);
 
-    function retrieveTotalAlgos() public view onlyOwner returns (uint256) {
-        return totalAlgosAvailable;
-    }
+            token.approve(address(this), min(qty, tokenQtyLeft));
+            token.transferFrom(address(this), bidder.getOwner(), min(qty, tokenQtyLeft));
 
-    function retrieveReservePrice() public view onlyOwner returns (uint256) {
-        return reservePrice;
-    }
-
-    function retrieveCurrentPrice() public view returns (int256) {
-        return currentPrice;
-    }
-
-    function retrieveTotalBidder() public view onlyOwner returns (uint256) {
-        return totalNumBidders;
-    }
-
-    function retrieveContractOwner() public view returns (address) {
-        return i_owner;
-    }
-
-    function retrieveContractBalance() public view onlyOwner returns (uint256) {
-        return address(this).balance;
-    }
-
-    function retrieveBidderBidValue(
-        uint256 bidder
-    ) public view onlyOwner returns (uint256) {
-        return biddersList[bidder].bidValue;
-    }
-
-    function retrieveBidderAlgos(
-        uint256 bidder
-    ) public view onlyOwner returns (uint256) {
-        return biddersList[bidder].totalAlgosPurchased;
-    }
-
-    function retrieveRefund(
-        uint256 bidder
-    ) public view onlyOwner returns (uint256) {
-        return biddersList[bidder].refundEth;
-    }
-
-    function balanceOfBidder(uint256 bidder) public view returns (uint256) {
-        return DAToken.balanceOf(biddersList[bidder].walletAddress);
-    }
-
-    function getAuctionState() public view returns (AuctionState) {
-        return s_auctionState;
-    }
-
-    function getRefundState(uint256 bidder) public view returns (bool){
-        return biddersList[bidder].ethRefunded;
-    }
-
-    function getUnsoldAlgos() public view returns (uint256){
-        return currentUnsoldAlgos;
-    }
-
-    function retreiveContractER20Tokens() public view returns(uint256){
-        return DAToken.balanceOf(address(this));
-    }
-
-    function retrieveTimeElapsed() public view returns(uint256){
-        if (startTime>0){
-        return (block.timestamp - startTime) / 60;}
-        else{
-            return 0;
+            // Send ether to seller
+            bidder.sendToAccount(seller, (min(qty, tokenQtyLeft) * finalPrice) / 10 ** 18);
+            tokenQtyLeft -= qty;
         }
 
+        // Refund any unsold tokens
+        if (tokenQtyLeft > 0) {
+            token.burn(address(this), tokenQtyLeft);
+        }
+        
+        endDistributingStage();
     }
 
-    fallback() external payable {
-        // addBidder();
+    // Utility function to get the minimum of two numbers
+    function min(uint256 a, uint256 b) pure internal returns (uint256) {
+        return a < b ? a : b;
     }
-
-    receive() external payable {
-        // addBidder();
-    }
-
-
-
-
 }
