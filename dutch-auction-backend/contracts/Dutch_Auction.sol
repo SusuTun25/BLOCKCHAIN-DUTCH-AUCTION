@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.21;
 
 
-import "./Token.sol";
+import "./ERC20Token.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 error Dutch_Auction__NotOwner();

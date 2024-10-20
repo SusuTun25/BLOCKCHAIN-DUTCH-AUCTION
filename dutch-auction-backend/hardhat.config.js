@@ -8,7 +8,22 @@ module.exports = {
       chainId: 31337
     },
     localhost: {
-      url: "http://127.0.0.1:8545"
+      url: "http://127.0.0.1:8545",
+      chainId: 31337
+    }
+  },
+  namedAccounts: {
+    deployer: {
+      default: 0
+    },
+    userOne: {
+      default: 1
+    },
+    userTwo: {
+      default: 2
+    },
+    userThree: {
+      default: 3
     }
   }
 };
