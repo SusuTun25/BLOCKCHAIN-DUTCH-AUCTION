@@ -1,25 +1,44 @@
+// We require the Hardhat Runtime Environment explicitly here. This is optional
+// but useful for running the script in a standalone fashion through `node <script>`.
+//
+// You can also run a script with `npx hardhat run <script>`. If you do that, Hardhat
+// will compile your contracts, add the Hardhat Runtime Environment's members to the
+// global scope, and execute the script.
 const hre = require("hardhat");
 
 async function main() {
-  const DutchAuction = await hre.ethers.getContractFactory("Dutch_Auction");
+    const [deployer] = await hre.ethers.getSigners();
 
-  const reservePrice = hre.ethers.parseEther("0.1");  // 0.1 ETH
-  const startPrice = hre.ethers.parseEther("1");      // 1 ETH
+    console.log("Deploying contracts with the account:", deployer.address);
 
-  console.log("Deploying Dutch Auction...");
-  const dutchAuction = await DutchAuction.deploy(reservePrice, startPrice);
+    const DutchAuctionFactory = await hre.ethers.getContractFactory(
+      "DutchAuctionFactory",
+    );
+    const TokenFactory = await hre.ethers.getContractFactory("TokenFactory");
+    const dutchAuctionFactory = await DutchAuctionFactory.deploy();
+    const tokenFactory = await TokenFactory.deploy();
 
-  await dutchAuction.waitForDeployment();
+    await dutchAuctionFactory.waitForDeployment();
+    await tokenFactory.waitForDeployment();
+    
+    const RevealContract = await hre.ethers.getContractFactory("Reveal");
+    const deployedReveal = await RevealContract.deploy();
+    await deployedReveal.waitForDeployment();
 
-  console.log("Dutch Auction deployed to:", await dutchAuction.getAddress());
+    const BidderFactory = await hre.ethers.getContractFactory("BidderFactory");
+    const deployedBidFactory = await BidderFactory.deploy(deployedReveal.target);
+    await deployedBidFactory.waitForDeployment();
 
-  // Optional: Start the auction
-  // const totalAlgosAvailable = 1000000;  // 1 million tokens
-  // const changePerMin = hre.ethers.parseEther("0.01"); // Price decreases by 0.01 ETH per minute
-  // console.log("Starting the auction...");
-  // const tx = await dutchAuction.startAuction(totalAlgosAvailable, changePerMin);
-  // await tx.wait();
-  // console.log("Auction started successfully!");
+    dutchAuctionAddress = dutchAuctionFactory.target;
+    tokenAddress = tokenFactory.target;
+    bidFactoryAddress = deployedBidFactory.target;
+    revealAddress = deployedReveal.target;
+
+    console.log("DutchAuctionFactory deployed at:", dutchAuctionAddress);
+    console.log("TokenFactory deployed at:", tokenAddress);
+    console.log("BidderFactory deployed at:", bidFactoryAddress);
+    console.log("Reveal deployed at:", revealAddress);
+
 }
 
 main()
