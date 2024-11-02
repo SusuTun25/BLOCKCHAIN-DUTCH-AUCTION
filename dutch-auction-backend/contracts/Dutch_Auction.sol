@@ -395,8 +395,4 @@ contract Dutch_Auction is ReentrancyGuard {
     receive() external payable {
         // addBidder();
     }
-
-
-
-
 }

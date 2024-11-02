@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Container, Row, Col, Card, Button, Alert } from 'react-bootstrap';
 import { connectMetaMask, getContract, listenForAccountChanges, listenForNetworkChanges } from '../utils/ethereum';
 import { ethers } from 'ethers';
-import DutchAuctionABI from '../contracts/DutchAuction.json'; // Make sure this path is correct
-
+import DutchAuctionABI from '../contracts/DutchAuction.json'; // Make sure this path is correct/
 const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS;
 
 const Auction = () => {
@@ -54,11 +53,11 @@ const Auction = () => {
 
   const updateAuctionInfo = async (auctionContract) => {
     try {
-      const price = await auctionContract.retrieveCurrentPrice();
+      const price = await auctionContract.getCurrentPrice();
       setCurrentPrice(ethers.formatEther(price));
       
-      const timeElapsed = await auctionContract.retrieveTimeElapsed();
-      setTimeLeft(Math.max(0, 1200 - timeElapsed * 60)); // Assuming 20 minutes auction time
+      const timeElapsed = await auctionContract.getTimeRemaining();
+      setTimeLeft(parseInt(timeElapsed.toString(), 10));
     } catch (error) {
       console.error('Error updating auction info:', error);
       setError("Failed to update auction information.");
@@ -69,7 +68,7 @@ const Auction = () => {
     if (contract && account) {
       setIsLoading(true);
       try {
-        const tx = await contract.addBidder({ value: ethers.parseEther(currentPrice) });
+        const tx = await contract.placeBid({ value: ethers.parseEther(currentPrice) });
         await tx.wait();
         alert('Bid placed successfully!');
         await updateAuctionInfo(contract);

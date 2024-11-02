@@ -26,11 +26,18 @@ async function main() {
   await erc20Token.waitForDeployment();
   console.log("ERC20Token deployed to:", await erc20Token.getAddress());
 
+   // Deploy Bidder contract
+   const Bidder = await hre.ethers.getContractFactory("Bidder");
+   const bidder = await Bidder.deploy();
+   await bidder.waitForDeployment();
+   const bidderAddress = await bidder.getAddress();
+   console.log("Bidder contract deployed to:", bidderAddress);
+
   // Deploy Dutch_Auction
   const DutchAuction = await hre.ethers.getContractFactory("Dutch_Auction");
   const reservePrice = hre.ethers.parseEther("0.1"); // 0.1 ETH
   const startPrice = hre.ethers.parseEther("1");    // 1 ETH
-  const dutchAuction = await DutchAuction.deploy(reservePrice, startPrice);
+  const dutchAuction = await DutchAuction.deploy(bidderAddress, reservePrice, startPrice);
   await dutchAuction.waitForDeployment();
   const dutchAuctionAddress = await dutchAuction.getAddress();
   console.log("Dutch_Auction deployed to:", dutchAuctionAddress);
