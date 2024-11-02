@@ -1,4 +1,19 @@
 const hre = require("hardhat");
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+const envFilePath = path.resolve(__dirname, '../../dutch-auction-frontend/.env');
+
+// Function to update the .env file
+const updateEnvValue = (key, value) => {
+  const envConfig = dotenv.parse(fs.readFileSync(envFilePath));
+  envConfig[key] = value;
+  const updatedEnvConfig = Object.keys(envConfig)
+    .map(k => `${k}=${envConfig[k]}`)
+    .join('\n');
+  fs.writeFileSync(envFilePath, updatedEnvConfig);
+};
+
 
 async function main() {
   const [deployer] = await hre.ethers.getSigners();
@@ -17,7 +32,11 @@ async function main() {
   const startPrice = hre.ethers.parseEther("1");    // 1 ETH
   const dutchAuction = await DutchAuction.deploy(reservePrice, startPrice);
   await dutchAuction.waitForDeployment();
-  console.log("Dutch_Auction deployed to:", await dutchAuction.getAddress());
+  const dutchAuctionAddress = await dutchAuction.getAddress();
+  console.log("Dutch_Auction deployed to:", dutchAuctionAddress);
+
+  // Update .env file with Dutch_Auction address
+  updateEnvValue('REACT_APP_CONTRACT_ADDRESS', dutchAuctionAddress);
 
   // Start the auction
   const totalTokens = 1000000; // 1 million tokens
