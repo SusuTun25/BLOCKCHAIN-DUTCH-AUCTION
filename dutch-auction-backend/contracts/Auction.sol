@@ -55,6 +55,7 @@ contract DutchAuction is ReentrancyGuard {
 
     function startAuction() public onlyOwner {
         require(auctionState == AuctionState.CLOSED, "Auction already started or paused");
+        require(!auctionStarted, "Auction already started");
         startTime = block.timestamp;
         auctionState = AuctionState.OPEN;
         auctionStarted = true;
@@ -72,6 +73,7 @@ contract DutchAuction is ReentrancyGuard {
             return auctionDuration; // If auction hasn't started, return full duration
         }
         uint256 elapsedTime = block.timestamp - startTime;
+        require(auctionStarted, "Time left : elapsedTime");
         if (elapsedTime >= auctionDuration) {
             return 0; // Auction has ended
         }
