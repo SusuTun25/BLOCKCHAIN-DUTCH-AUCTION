@@ -169,7 +169,6 @@ contract DutchAuction is ReentrancyGuard {
         emit TokensClaimed(bidderID, msg.sender, tokensOwed);
     }
 
-
     function withdrawFunds() public onlyOwner {
         require(auctionState == AuctionState.CLOSED, "Auction is not closed");
         payable(owner).transfer(totalFundsRaised);
