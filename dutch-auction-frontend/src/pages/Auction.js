@@ -12,6 +12,10 @@ const Auction = () => {
   const [account, setAccount] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
+  const startPrice = ethers.parseEther("1");
+  const reservePrice = ethers.parseEther("0.1");
+  const priceDecrement = ethers.parseEther("0.05");
+
 
   useEffect(() => {
     const init = async () => {
@@ -46,23 +50,79 @@ const Auction = () => {
       if (contract) {
         updateAuctionInfo(contract);
       }
-    }, 10000); // Update every 10 seconds
+    }, 10000); // Update every 1 seconds
 
     return () => clearInterval(intervalId);
-  }, []);
+  }, [contract]);
+
+  const calculateRemainingTime = (currentTime, startTime, auctionDuration) => {
+    currentTime = Number(currentTime);
+    startTime = Number(startTime);
+    auctionDuration = Number(auctionDuration);
+
+    const elapsedTime = currentTime - startTime;
+    const remainingTime = auctionDuration - elapsedTime;
+    return remainingTime > 0 ? remainingTime : 0;
+  };
+
+  const getCurrentPrice = async (currentTime, startTime, auctionDuration) => {
+    const current_time = Number(currentTime);
+    const start_time = Number(startTime);
+    const auction_duration = Number(auctionDuration);
+    const elapsedMinutes = (current_time - start_time) / 60;
+    const elapsed_minutes = Number(elapsedMinutes);
+
+    const price_decrease = elapsed_minutes * Number(priceDecrement);
+
+    // console.log('getCurrentPrice:', current_time, start_time, auction_duration);
+    // console.log('startPrice:', startPrice.toString());
+    // console.log('reservePrice:', reservePrice.toString());
+    // console.log('priceDecrement:', priceDecrement.toString());
+    // console.log('Price decrease:', price_decrease.toString());
+
+    if (currentTime >= startTime + auctionDuration) {
+      // console.log('Auction price has reached reserve price:', reservePrice);
+      const reservePriceInEther = ethers.formatEther(reservePrice);
+      return reservePriceInEther;
+    }
+
+    const price = (Number(startPrice) > price_decrease) ? (Number(startPrice) - price_decrease) : Number(reservePrice);
+    // console.log('Current price:', price);
+    const priceInWei = ethers.parseUnits(price.toString(), 'wei');
+    // console.log('Price in Wei:', priceInWei.toString());
+    const priceInEther = ethers.formatEther(priceInWei);
+
+    const roundedPriceInEther = parseFloat(priceInEther).toFixed(4);
+
+    return roundedPriceInEther;
+  };
 
   const updateAuctionInfo = async (auctionContract) => {
     try {
-      const price = await auctionContract.getCurrentPrice();
-      setCurrentPrice(ethers.formatEther(price));
+      // const timeElapsed = await auctionContract.getTimeRemaining();
+      // setTimeLeft(parseInt(timeElapsed.toString(), 10));
+      const auctionStarted = await auctionContract.auctionStarted();
+      const startTime = await auctionContract.startTime();
+      const auctionDuration = await auctionContract.auctionDuration();
+      const currentTime = Math.floor(Date.now() / 1000);
+
+      if (!auctionStarted) {
+        setTimeLeft(auctionDuration);
+      } else {
+        const remainingTime = calculateRemainingTime(currentTime, startTime, auctionDuration);
+        setTimeLeft(remainingTime);
+      }
+
+      // const price = await auctionContract.getCurrentPrice();
+      const price = await getCurrentPrice(currentTime, startTime, auctionDuration);
+      setCurrentPrice(price);
       
-      const timeElapsed = await auctionContract.getTimeRemaining();
-      setTimeLeft(parseInt(timeElapsed.toString(), 10));
     } catch (error) {
       console.error('Error updating auction info:', error);
       setError("Failed to update auction information.");
     }
   };
+
 
   const placeBid = async () => {
     if (contract && account) {
