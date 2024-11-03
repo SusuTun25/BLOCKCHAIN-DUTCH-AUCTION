@@ -139,7 +139,7 @@ contract DutchAuction is ReentrancyGuard {
         }
     }
 
-    function endAuction() internal {
+    function endAuction() public onlyOwner {
         emit Debug("Starting endAuction", totalTokensAvailable);
 
         auctionState = AuctionState.CLOSED;

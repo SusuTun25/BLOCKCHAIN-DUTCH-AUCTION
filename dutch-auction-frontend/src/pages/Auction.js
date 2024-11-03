@@ -93,7 +93,6 @@ const Auction = () => {
   
       // If the auction has ended, end it
       if (timeRemaining <= 0 || isAuctionEnded) {
-        await endAuction();
         console.log("Auction has ended. Skipping update.");
         return;
       }
@@ -110,13 +109,6 @@ const Auction = () => {
       // If there's an error getting timeRemaining, end the auction
       console.error("Error retrieving timeRemaining:", error);
       setError("Error retrieving time remaining; attempting to end auction.");
-  
-      try {
-        await endAuction();
-      } catch (endError) {
-        console.error("Error ending auction:", endError);
-        setError("Failed to end auction after timeRemaining error.");
-      }
     }
   };
   
@@ -160,18 +152,18 @@ const Auction = () => {
     }
   }, [timeLeft]);
 
-  const endAuction = async () => {
-    try {
-      const tx = await contract.checkAndEndAuction();
-      await tx.wait();
-      const state = await contract.getAuctionStatus();
-      console.log(state);
-      alert("Auction ended successfully!");
-    } catch (error) {
-      console.error("Error ending auction:", error.message || error);
-      alert("Failed to end the auction.");
-    }
-  };
+  // const endAuction = async () => {
+  //   try {
+  //     const tx = await contract.checkAndEndAuction({ gasLimit: ethers.hexlify(500000) });
+  //     await tx.wait();
+  //     const state = await contract.getAuctionStatus();
+  //     console.log(state);
+  //     alert("Auction ended successfully!");
+  //   } catch (error) {
+  //     console.error("Error ending auction:", error.message || error);
+  //     alert("Failed to end the auction.");
+  //   }
+  // };
 
   useEffect(() => {
     if (contract) {
@@ -189,14 +181,16 @@ const Auction = () => {
   }, [contract]); // Run this only once when the contract is set
   
 
-  const claimTokens = async (bidderID) => {
+  const claimTokens = async () => {
     if (contract && account) {
       try {
-        updateAuctionInfo();
+        updateAuctionInfo(contract);
+        const tx = await contract.endAuction();
+        await tx.wait();
         const state = await contract.getAuctionStatus();
         console.log(state);
-        const tx = await contract.sendTokens();
-        await tx.wait();
+        const tx2 = await contract.sendTokens();
+        await tx2.wait();
         alert("Tokens claimed successfully!");
         
         // Log only essential information
