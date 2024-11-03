@@ -96,7 +96,7 @@ contract DutchAuction is ReentrancyGuard {
     function placeBid() public payable nonReentrant {
         require(auctionState == AuctionState.OPEN, "Auction is not open");
         uint256 currentPrice = getCurrentPrice();
-        require(msg.value >= currentPrice, "Bid below current price");
+        // require(msg.value >= currentPrice, "Bid below current price");
 
         uint256 tokensToBuy = msg.value / currentPrice;
         require(tokensToBuy <= totalTokensAvailable, "Not enough tokens left");
