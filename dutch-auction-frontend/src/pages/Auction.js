@@ -68,13 +68,12 @@ const Auction = () => {
   const getCurrentPrice = async (currentTime, startTime, auctionDuration) => {
     const current_time = Number(currentTime);
     const start_time = Number(startTime);
-    const auction_duration = Number(auctionDuration);
     const elapsedMinutes = (current_time - start_time) / 60;
     const elapsed_minutes = Number(elapsedMinutes);
 
     const price_decrease = elapsed_minutes * Number(priceDecrement);
 
-    // console.log('getCurrentPrice:', current_time, start_time, auction_duration);
+    // console.log('getCurrentPrice:', current_time, start_time);
     // console.log('startPrice:', startPrice.toString());
     // console.log('reservePrice:', reservePrice.toString());
     // console.log('priceDecrement:', priceDecrement.toString());
@@ -128,6 +127,7 @@ const Auction = () => {
     if (contract && account) {
       setIsLoading(true);
       try {
+        console.log('Current price:', currentPrice);
         const tx = await contract.placeBid({ value: ethers.parseEther(currentPrice) });
         await tx.wait();
         alert('Bid placed successfully!');
