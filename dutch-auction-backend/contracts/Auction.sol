@@ -140,33 +140,60 @@ contract DutchAuction is ReentrancyGuard {
     }
 
     function endAuction() internal {
+        emit Debug("Starting endAuction", totalTokensAvailable);
+
         auctionState = AuctionState.CLOSED;
         uint256 unsoldTokens = totalTokensAvailable;
+        emit Debug("Auction state set to CLOSED", uint256(auctionState));
 
-        payable(owner).transfer(totalFundsRaised);
+        // Attempt to transfer funds to the owner
+        bool transferSuccess = payable(owner).send(totalFundsRaised);
+        require(transferSuccess, "Owner fund transfer failed");
+        emit Debug("Owner funds transferred", totalFundsRaised);
 
+        // Attempt to transfer unsold tokens to the owner, if any
         if (unsoldTokens > 0) {
-            token.transfer(owner, unsoldTokens);
+            emit Debug("Transferring unsold tokens to owner", unsoldTokens);
+            bool tokenTransferSuccess = token.transfer(owner, unsoldTokens);
+            require(tokenTransferSuccess, "Token transfer to owner failed");
         }
 
         emit AuctionEnded(totalFundsRaised, unsoldTokens);
     }
 
-    function claimTokens(uint256 bidderID) external {
-        require(auctionState == AuctionState.CLOSED, "Auction has not ended"); // Changed to CLOSED
-        
-        Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(bidderID);
-        require(bidder.walletAddress == msg.sender, "Not authorized");
-        require(bidder.tokensPurchased > 0, "No tokens to claim");
-        require(!bidder.tokenSent, "Tokens already claimed");
+    function sendTokens() public onlyOwner {
+        require(auctionState == AuctionState.CLOSED, "Auction has not ended"); // Ensure auction is closed
 
-        uint256 tokensOwed = bidder.tokensPurchased;
+        uint256 totalBidders = bidderContract.totalBidders();
+        emit Debug("Total Bidders", totalBidders);
 
-        bidderContract.markTokensAsClaimed(bidderID); // Marks tokens as claimed in Bidder contract
+        for (uint i = 0; i < totalBidders; i++) {
+            // Retrieve bidder info from the Bidder contract
+            Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(i);
+            emit Debug("Processing Bidder", i);
+            
+            if (bidder.tokensPurchased > 0 && !bidder.tokenSent) {
+                uint256 tokensOwed = bidder.tokensPurchased;
+                emit Debug("Tokens to be sent", tokensOwed);
+                emit Debug("Bidder wallet address", uint256(uint160(bidder.walletAddress))); // Log address as uint for debugging
 
-        require(token.transfer(msg.sender, tokensOwed), "Token transfer failed"); // Transfer tokens to the bidder
+                bidderContract.markTokensAsClaimed(i);
+   
+                // Transfer tokens to the bidder
+                bool transferSuccess = token.transfer(bidder.walletAddress, tokensOwed);
+                require(transferSuccess, "Token transfer failed");
 
-        emit TokensClaimed(bidderID, msg.sender, tokensOwed);
+                // Emit an event for successful token transfer
+                emit TokensClaimed(i, bidder.walletAddress, tokensOwed);
+            } else {
+                if (bidder.tokensPurchased == 0) {
+                    emit Debug("No tokens to be sent for Bidder", i);
+                }
+                if (bidder.tokenSent) {
+                    emit Debug("Tokens already sent for Bidder", i);
+                }
+            }
+        }
     }
 
     function withdrawFunds() public onlyOwner {

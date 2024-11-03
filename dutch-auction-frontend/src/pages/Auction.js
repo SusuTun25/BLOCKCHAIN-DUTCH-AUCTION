@@ -18,6 +18,7 @@ const Auction = () => {
   useEffect(() => {
     const initContract = async () => {
       try {
+        console.log("Set Contract")
         const result = await connectMetaMask();
         if (result && result.signer && result.address) {
           setAccount(result.address);
@@ -50,12 +51,24 @@ const Auction = () => {
     };
   }, []); // Empty dependency array to run only once
   
-  const handleAccountChange = (newAccount) => {
-    if (newAccount.length > 0) {
-      setAccount(newAccount[0]);
-      // Call only account-specific updates if needed
+  const handleAccountChange = async (newAccounts) => {
+    if (newAccounts.length > 0) {
+      const newAccount = newAccounts[0];
+      setAccount(newAccount);
+      const result = await connectMetaMask();
+  
+      // Reconnect to contract with new account
+      const auctionContract = getContract(
+        CONTRACT_ADDRESS,
+        DutchAuctionABI.abi,
+        result.signer
+      );
+      setContract(auctionContract);
+      await updateAuctionInfo(auctionContract);
     } else {
       setAccount(null);
+      setContract(null);
+      setError("No accounts connected.");
     }
   };
   
@@ -65,26 +78,45 @@ const Auction = () => {
   };
   
   const updateAuctionInfo = async (auctionContract) => {
+    if (!auctionContract) {
+      console.error("Auction contract is undefined. Skipping update.");
+      setError("Auction contract not found. Please try reconnecting.");
+      return; // Exit if auctionContract is undefined
+    }
+  
     try {
-      if (isAuctionEnded) {
+      // Attempt to get the time remaining
+      const timeRemaining = await auctionContract.getTimeRemaining();
+      setTimeLeft(parseInt(timeRemaining.toString(), 10));
+      console.log("Time remaining:", parseInt(timeRemaining.toString(), 10));
+      setIsAuctionEnded(timeRemaining <= 0);
+  
+      // If the auction has ended, end it
+      if (timeRemaining <= 0 || isAuctionEnded) {
+        await endAuction();
         console.log("Auction has ended. Skipping update.");
         return;
       }
   
-      const timeRemaining = await auctionContract.getTimeRemaining();
-      setTimeLeft(parseInt(timeRemaining.toString(), 10));
-      setIsAuctionEnded(timeRemaining <= 0);
-  
+      // Fetch remaining tokens if auction is still active
       const token = await auctionContract.getRemainingTokens();
       setCurrentToken(ethers.formatUnits(token, 18));
   
-      if (!isAuctionEnded) {
-        const price = await auctionContract.getCurrentPrice();
-        setCurrentPrice(ethers.formatEther(price));
-      }
+      // Get the current price if auction is active
+      const price = await auctionContract.getCurrentPrice();
+      setCurrentPrice(ethers.formatEther(price));
+  
     } catch (error) {
-      console.error("Error updating auction info:", error);
-      setError("Failed to update auction information.");
+      // If there's an error getting timeRemaining, end the auction
+      console.error("Error retrieving timeRemaining:", error);
+      setError("Error retrieving time remaining; attempting to end auction.");
+  
+      try {
+        await endAuction();
+      } catch (endError) {
+        console.error("Error ending auction:", endError);
+        setError("Failed to end auction after timeRemaining error.");
+      }
     }
   };
   
@@ -163,7 +195,7 @@ const Auction = () => {
         updateAuctionInfo();
         const state = await contract.getAuctionStatus();
         console.log(state);
-        const tx = await contract.claimTokens(bidderID);
+        const tx = await contract.sendTokens();
         await tx.wait();
         alert("Tokens claimed successfully!");
         
