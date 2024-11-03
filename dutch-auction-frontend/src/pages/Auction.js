@@ -7,6 +7,7 @@ const CONTRACT_ADDRESS = process.env.REACT_APP_CONTRACT_ADDRESS;
 
 const Auction = () => {
   const [currentPrice, setCurrentPrice] = useState(0);
+  const [currentToken, setCurrentToken] = useState(0);
   const [timeLeft, setTimeLeft] = useState(0);
   const [contract, setContract] = useState(null);
   const [account, setAccount] = useState(null);
@@ -14,21 +15,79 @@ const Auction = () => {
   const [error, setError] = useState(null);
   const [isAuctionEnded, setIsAuctionEnded] = useState(false);
 
+  useEffect(() => {
+    const initContract = async () => {
+      try {
+        const result = await connectMetaMask();
+        if (result && result.signer && result.address) {
+          setAccount(result.address);
+          const auctionContract = getContract(
+            CONTRACT_ADDRESS,
+            DutchAuctionABI.abi,
+            result.signer
+          );
+          setContract(auctionContract); // Set contract only once
+          await updateAuctionInfo(auctionContract); // Load auction info once on load
+        } else {
+          setError("Failed to connect to MetaMask. Please make sure it's installed and unlocked.");
+        }
+      } catch (err) {
+        console.error("Error in initContract:", err);
+        setError("An error occurred while initializing the auction.");
+      }
+    };
+  
+    initContract(); // Initialize contract only once
+  
+    // Set up listeners for account and network changes
+    window.ethereum?.on("accountsChanged", handleAccountChange);
+    window.ethereum?.on("chainChanged", handleNetworkChange);
+  
+    // Clean up listeners on component unmount
+    return () => {
+      window.ethereum?.removeListener("accountsChanged", handleAccountChange);
+      window.ethereum?.removeListener("chainChanged", handleNetworkChange);
+    };
+  }, []); // Empty dependency array to run only once
+  
+  const handleAccountChange = (newAccount) => {
+    if (newAccount.length > 0) {
+      setAccount(newAccount[0]);
+      // Call only account-specific updates if needed
+    } else {
+      setAccount(null);
+    }
+  };
+  
+  const handleNetworkChange = () => {
+    // If a network change requires re-initialization, handle it here
+    setError("Network has changed. Please reconnect or reload if necessary.");
+  };
+  
   const updateAuctionInfo = async (auctionContract) => {
     try {
-      const price = await auctionContract.getCurrentPrice();
-      setCurrentPrice(ethers.formatEther(price));
-
+      if (isAuctionEnded) {
+        console.log("Auction has ended. Skipping update.");
+        return;
+      }
+  
       const timeRemaining = await auctionContract.getTimeRemaining();
       setTimeLeft(parseInt(timeRemaining.toString(), 10));
-      setIsAuctionEnded(timeRemaining <= 0)
-      console.log(timeRemaining)
+      setIsAuctionEnded(timeRemaining <= 0);
+  
+      const token = await auctionContract.getRemainingTokens();
+      setCurrentToken(ethers.formatUnits(token, 18));
+  
+      if (!isAuctionEnded) {
+        const price = await auctionContract.getCurrentPrice();
+        setCurrentPrice(ethers.formatEther(price));
+      }
     } catch (error) {
       console.error("Error updating auction info:", error);
       setError("Failed to update auction information.");
     }
   };
-
+  
   const placeBid = async () => {
     if (contract && account && !isAuctionEnded) {
       setIsLoading(true);
@@ -36,7 +95,7 @@ const Auction = () => {
         const tx = await contract.placeBid({ value: ethers.parseEther(currentPrice) });
         await tx.wait();
         alert("Bid placed successfully!");
-        await updateAuctionInfo(contract);
+        await updateAuctionInfo(contract); // Refresh auction info after placing bid
       } catch (error) {
         if (error.code === -32603 || error.message.includes("revert")) {
           console.error("Error placing bid: Contract has ended.");
@@ -50,66 +109,107 @@ const Auction = () => {
       }
     }
   };
+  
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        const result = await connectMetaMask();
-        if (result && result.signer && result.address) {
-          setAccount(result.address);
-          const auctionContract = getContract(
-            CONTRACT_ADDRESS,
-            DutchAuctionABI.abi,
-            result.signer
-          );
-          setContract(auctionContract);
-          await updateAuctionInfo(auctionContract);
-        } else {
-          setError("Failed to connect to MetaMask. Please make sure it's installed and unlocked.");
-        }
-      } catch (err) {
-        console.error("Error in init:", err);
-        setError("An error occurred while initializing the auction.");
-      }
-    };
+  // const updateAuctionInfo = async (auctionContract) => {
+  //   try {
 
-    init();
+  //     if (isAuctionEnded) {
+  //       await endAuction();
+  //       console.log("Auction has ended. Skipping update.");
+  //       return;
+  //     }
 
-    listenForAccountChanges((newAccount) => {
-      if (newAccount.length > 0) {
-        setAccount(newAccount[0]);
-        init(); // Reinitialize with new account
-      } else {
-        setAccount(null);
-      }
-    });
+  //     const timeRemaining = await auctionContract.getTimeRemaining();
+  //     console.log(timeRemaining)
+  //     setTimeLeft(parseInt(timeRemaining.toString(), 10));
+  //     setIsAuctionEnded(timeRemaining <= 0)
 
-    listenForNetworkChanges(() => {
-      init(); // Reinitialize on network change
-    });
+  //     const token = await auctionContract.getRemainingTokens();
+  //     console.log(token)
+  //     setcurrentToken(ethers.formatUnits(token, 18))
 
-    // Set up listeners
-    window.ethereum?.on("accountsChanged", listenForAccountChanges);
-    window.ethereum?.on("chainChanged", listenForNetworkChanges);
+  //     if (!isAuctionEnded) {
+  //       const price = await auctionContract.getCurrentPrice();
+  //       setCurrentPrice(ethers.formatEther(price));
+  //     }
+      
+  //     console.log(timeRemaining)
+  //   } catch (error) {
+  //     console.error("Error updating auction info:", error);
+  //     setError("Failed to update auction information.");
+  //   }
+  // };
 
-    // Clean up interval on component unmount
-    return () => {
-      window.ethereum?.removeListener("accountsChanged", listenForAccountChanges);
-      window.ethereum?.removeListener("chainChanged", listenForNetworkChanges);
-    }
-  }, []);
+  // const placeBid = async () => {
+  //   if (contract && account && !isAuctionEnded) {
+  //     setIsLoading(true);
+  //     try {
+  //       const tx = await contract.placeBid({ value: ethers.parseEther(currentPrice) });
+  //       await tx.wait();
+  //       alert("Bid placed successfully!");
+  //       await updateAuctionInfo(contract);
+  //     } catch (error) {
+  //       if (error.code === -32603 || error.message.includes("revert")) {
+  //         console.error("Error placing bid: Contract has ended.");
+  //         setError("The auction has ended. Bids are no longer accepted.");
+  //       } else {
+  //         console.error("Error placing bid:", error);
+  //         setError("Failed to place bid. Please try again.");
+  //       }
+  //     } finally {
+  //       setIsLoading(false);
+  //     }
+  //   }
+  // };
 
-  useEffect(() => {
-    if (contract) {
-      const intervalId = setInterval(() => {
-        updateAuctionInfo(contract);
-        console.log("Running updateAuctionInfo");
-      }, 10000); // Refresh every 10 seconds
+  // useEffect(() => {
+  //   const init = async () => {
+  //     try {
+  //       const result = await connectMetaMask();
+  //       if (result && result.signer && result.address) {
+  //         setAccount(result.address);
+  //         const auctionContract = getContract(
+  //           CONTRACT_ADDRESS,
+  //           DutchAuctionABI.abi,
+  //           result.signer
+  //         );
+  //         setContract(auctionContract);
+  //         await updateAuctionInfo(auctionContract);
+  //       } else {
+  //         setError("Failed to connect to MetaMask. Please make sure it's installed and unlocked.");
+  //       }
+  //     } catch (err) {
+  //       console.error("Error in init:", err);
+  //       setError("An error occurred while initializing the auction.");
+  //     }
+  //   };
 
-      // Clear the interval on component unmount
-      return () => clearInterval(intervalId);
-    }
-  }, [contract]); // Run only when `contract` is set
+  //   init();
+
+  //   listenForAccountChanges((newAccount) => {
+  //     if (newAccount.length > 0) {
+  //       setAccount(newAccount[0]);
+  //       init(); // Reinitialize with new account
+  //     } else {
+  //       setAccount(null);
+  //     }
+  //   });
+
+  //   listenForNetworkChanges(() => {
+  //     init(); // Reinitialize on network change
+  //   });
+
+  //   // Set up listeners
+  //   window.ethereum?.on("accountsChanged", listenForAccountChanges);
+  //   window.ethereum?.on("chainChanged", listenForNetworkChanges);
+
+  //   // Clean up interval on component unmount
+  //   return () => {
+  //     window.ethereum?.removeListener("accountsChanged", listenForAccountChanges);
+  //     window.ethereum?.removeListener("chainChanged", listenForNetworkChanges);
+  //   }
+  // }, []);
 
   // Local countdown effect for smooth timer decrement
   useEffect(() => {
@@ -128,6 +228,54 @@ const Auction = () => {
       return () => clearInterval(countdownIntervalId);
     }
   }, [timeLeft]);
+
+  const endAuction = async () => {
+    try {
+      const tx = await contract.checkAndEndAuction();
+      await tx.wait();
+      const state = await contract.getAuctionStatus();
+      console.log(state);
+      alert("Auction ended successfully!");
+    } catch (error) {
+      console.error("Error ending auction:", error.message || error);
+      alert("Failed to end the auction.");
+    }
+  };
+
+  useEffect(() => {
+    if (contract) {
+      const handleDebugEvent = (message, value) => {
+        console.log(`Debug Event - ${message}: ${value.toString()}`);
+      };
+  
+      contract.on("Debug", handleDebugEvent);
+  
+      // Clean up the event listener when component unmounts
+      return () => {
+        contract.off("Debug", handleDebugEvent);
+      };
+    }
+  }, [contract]); // Run this only once when the contract is set
+  
+
+  const claimTokens = async (bidderID) => {
+    if (contract && account) {
+      try {
+        updateAuctionInfo();
+        const state = await contract.getAuctionStatus();
+        console.log(state);
+        const tx = await contract.claimTokens(bidderID);
+        await tx.wait();
+        alert("Tokens claimed successfully!");
+        
+        // Log only essential information
+        console.log("Transaction Hash:", tx.hash);
+      } catch (error) {
+        console.error("Error claiming tokens:", error.message || error); // Log only the message, not the full object
+        alert("Failed to claim tokens.");
+      }
+    }
+  };
 
   return (
     <Container className="mt-5">
@@ -153,6 +301,13 @@ const Auction = () => {
               </Card.Text>
             </Card.Body>
           </Card>
+
+          <Card className="text-center mb-4">
+            <Card.Body>
+              <Card.Title>Coin Available</Card.Title>
+              <Card.Text className="display-4">{currentToken}</Card.Text>
+            </Card.Body>
+          </Card>
           
           <div className="d-grid gap-2">
             <Button 
@@ -162,6 +317,21 @@ const Auction = () => {
               disabled={!account || timeLeft === 0 || isLoading}
             >
               {isLoading ? 'Processing...' : 'Place Bid'}
+            </Button>
+          </div>
+
+          <div>
+
+          </div>
+
+          <div className="d-grid gap-2">
+            <Button 
+              variant="primary" 
+              size="lg" 
+              onClick={claimTokens}
+              disabled={!account || timeLeft > 0}
+            >
+              {isLoading ? 'Claiming...' : 'Claim Bid'}
             </Button>
           </div>
 

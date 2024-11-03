@@ -18,6 +18,7 @@ contract Bidder {
     event BidderAdded(uint256 indexed bidderID, address walletAddress, uint256 bidValue);
     event TokensAllocated(uint256 indexed bidderID, uint256 tokensPurchased);
     event RefundSet(uint256 indexed bidderID, uint256 refundAmount);
+    event TokensClaimed(uint256 indexed bidderID, address indexed bidder, uint256 amount);
 
     /**
      * @dev Adds a new bidder to the bidders mapping.
@@ -71,5 +72,10 @@ contract Bidder {
     function getBidderInfo(uint256 _bidderID) public view returns (BidderInfo memory) {
         require(_bidderID < totalBidders, "Invalid bidder ID");
         return bidders[_bidderID];
+    }
+
+    function markTokensAsClaimed(uint256 _bidderID) external {
+        require(_bidderID < totalBidders, "Invalid bidder ID");
+        bidders[_bidderID].tokenSent = true;
     }
 }

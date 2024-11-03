@@ -21,7 +21,7 @@ async function main() {
 
     // Deploy ERC20Token
     const ERC20Token = await hre.ethers.getContractFactory("ERC20Token");
-    const initialSupply = 1000000; // 1 million tokens
+    const initialSupply = 10; // 1 million tokens
     const erc20Token = await ERC20Token.deploy(initialSupply, deployer.address);
     await erc20Token.waitForDeployment();
     console.log("ERC20Token deployed to:", await erc20Token.getAddress());
@@ -42,8 +42,8 @@ async function main() {
     const DutchAuction = await hre.ethers.getContractFactory("DutchAuction");
     const startPrice = hre.ethers.parseEther("1"); // 1 ETH
     const reservePrice = hre.ethers.parseEther("0.1"); // 0.1 ETH
-    const auctionDuration = 1200; // Auction duration in seconds (1 hour)
-    const totalTokens = hre.ethers.parseUnits("1000000", 18); // 100 tokens
+    const auctionDuration = 120; // Auction duration in seconds (1 hour)
+    const totalTokens = hre.ethers.parseUnits("10", 18); // 100 tokens
     const priceDecrement = hre.ethers.parseEther("0.05"); // Price decreases by 0.05 ETH per minute
 
     const dutchAuction = await DutchAuction.deploy(
