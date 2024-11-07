@@ -211,6 +211,22 @@ contract DutchAuction is ReentrancyGuard {
         require(success, "Refund transfer failed");
     }
 
+    function claimTokens(uint256 bidderID) public nonReentrant {
+        require(auctionState == AuctionState.CLOSED, "Auction is not closed");
+        
+        Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(bidderID);
+        require(msg.sender == bidder.walletAddress, "Not the bidder");
+        require(!bidder.tokenSent, "Tokens already claimed");
+        require(bidder.tokensPurchased > 0, "No tokens to claim");
+
+        bidderContract.markTokensAsClaimed(bidderID);
+        
+        bool transferSuccess = token.transfer(msg.sender, bidder.tokensPurchased);
+        require(transferSuccess, "Token transfer failed");
+
+        emit TokensClaimed(bidderID, msg.sender, bidder.tokensPurchased);
+    }
+
     function getAuctionStatus() public view returns (AuctionState) {
         return auctionState;
     }
@@ -225,5 +241,16 @@ contract DutchAuction is ReentrancyGuard {
 
     function getBidderInfo(uint256 bidderID) public view returns (Bidder.BidderInfo memory) {
         return bidderContract.getBidderInfo(bidderID);
+    }
+
+    function getBidderID(address bidderAddress) public view returns (uint256) {
+        uint256 totalBids = bidderContract.totalBidders();
+        for(uint256 i = 0; i < totalBids; i++) {
+            Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(i);
+            if(bidder.walletAddress == bidderAddress) {
+                return i;
+            }
+        }
+        revert("Bidder not found");
     }
 }
