@@ -1,0 +1,14 @@
+const INITIAL_SUPPLY = "1000000000000000000000000";
+const INITIAL_SUPPLY_INT = 1000000;
+const RESERVE_PRICE = "10";
+const START_PRICE = "50";
+const CHANGEPERMIN = "15000000000000000000";
+
+module.exports = {
+  developmentChains: ["hardhat", "localhost"],
+  INITIAL_SUPPLY,
+  INITIAL_SUPPLY_INT,
+  RESERVE_PRICE,
+  START_PRICE,
+  CHANGEPERMIN,
+};
