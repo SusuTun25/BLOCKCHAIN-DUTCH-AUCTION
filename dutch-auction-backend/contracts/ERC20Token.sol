@@ -10,16 +10,16 @@ contract ERC20Token is Context, ERC20, Ownable {
         uint256 initialSupply,
         address contractAddress
     ) Ownable(msg.sender) ERC20("ERC20Token", "ET") {
-        _mint(msg.sender, initialSupply * (10 ** decimals()));
+        _mint(msg.sender, initialSupply * (10 ** 18));
         // Approve auction contract to spend tokens
-        _approve(msg.sender, contractAddress, initialSupply * (10 ** decimals()));
+        _approve(msg.sender, contractAddress, initialSupply * (10 ** 18));
     }
 
     function approveContract(address contractAddress, uint256 amount) public onlyOwner {
-        _approve(msg.sender, contractAddress, amount * (10 ** decimals()));
+        _approve(msg.sender, contractAddress, amount * (10 ** 18));
     }
 
     function burn(address i_owner, uint256 amount) public onlyOwner {
-        _burn(i_owner, amount * (10 ** decimals()));
+        _burn(i_owner, amount * (10 ** 18));
     }
 }

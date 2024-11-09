@@ -7,7 +7,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract DutchAuction is ReentrancyGuard {
     address public owner;
-    IERC20 public token;
+    ERC20Token public token;
     Bidder public bidderContract;
 
     uint256 public startPrice;
@@ -64,7 +64,7 @@ contract DutchAuction is ReentrancyGuard {
         uint256 _priceDecrement
     ) {
         owner = msg.sender;
-        token = IERC20(_token);
+        token = ERC20Token(_token);
         bidderContract = Bidder(_bidderContract);
         startPrice = _startPrice;
         reservePrice = _reservePrice;
@@ -200,11 +200,10 @@ contract DutchAuction is ReentrancyGuard {
         require(transferSuccess, "Owner fund transfer failed");
         emit Debug("Owner funds transferred", totalFundsRaised);
 
-        // Transfer unsold tokens to owner
+         // Burn unsold tokens if any
         if (unsoldTokens > 0) {
-            emit Debug("Transferring unsold tokens to owner", unsoldTokens);
-            bool tokenTransferSuccess = token.transfer(owner, unsoldTokens);
-            require(tokenTransferSuccess, "Token transfer to owner failed");
+            emit Debug("Burning unsold tokens", unsoldTokens);
+            token.burn(address(this), unsoldTokens); // Burn unsold tokens from contract's balance
         }
 
         emit AuctionEnded(totalFundsRaised, unsoldTokens);

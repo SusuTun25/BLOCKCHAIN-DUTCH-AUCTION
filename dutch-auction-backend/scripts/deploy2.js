@@ -69,15 +69,17 @@ async function main() {
   try {
     const [deployer] = await hre.ethers.getSigners();
     console.log("Deploying contracts with the account:", deployer.address);
-    console.log("Account balance:", (await deployer.provider.getBalance(deployer.address)).toString());
+    //console.log("Account balance:", (await deployer.provider.getBalance(deployer.address)).toString());
 
     // Deploy ERC20Token
     const ERC20Token = await hre.ethers.getContractFactory("ERC20Token");
-    const initialSupply = hre.ethers.parseUnits("1000", 18); // 1000 tokens
+    const initialSupply = 100; // 1000 tokens
     const erc20Token = await ERC20Token.deploy(initialSupply, deployer.address);
     await erc20Token.waitForDeployment();
     const tokenAddress = await erc20Token.getAddress();
     console.log("ERC20Token deployed to:", tokenAddress);
+    // const balance = await erc20Token.balanceOf(deployer.address);
+    // console.log("Token balance of deployer:", hre.ethers.formatUnits(balance, 18));
     await verifyContract(tokenAddress);
 
     // Deploy Bidder contract
