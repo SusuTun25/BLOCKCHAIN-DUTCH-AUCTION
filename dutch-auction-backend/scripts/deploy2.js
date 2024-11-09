@@ -42,16 +42,25 @@ const verifyContract = async (address) => {
 const setupTokenForAuction = async (token, auctionAddress, amount) => {
   try {
     // Approve auction contract to spend tokens
-    const tx = await token.approve(auctionAddress, amount);
-    await tx.wait();
-    console.log(`Approved auction contract to spend ${amount} tokens`);
+    console.log("Approving auction contract to spend tokens...");
+    const approveTx = await token.approveContract(auctionAddress, amount);
+    await approveTx.wait();
+    console.log("Approval successful");
 
     // Transfer tokens to auction contract
+    console.log(`Transferring ${amount} tokens to auction contract...`);
     const transferTx = await token.transfer(auctionAddress, amount);
     await transferTx.wait();
-    console.log(`Transferred ${amount} tokens to auction contract`);
+    console.log("Transfer successful");
+
+    // Verify balances
+    const auctionBalance = await token.balanceOf(auctionAddress);
+    console.log("Auction contract token balance:", ethers.formatUnits(auctionBalance, 18));
+    
+    const allowance = await token.allowance(await token.owner(), auctionAddress);
+    console.log("Auction contract allowance:", ethers.formatUnits(allowance, 18));
   } catch (error) {
-    console.error('Error setting up tokens for auction:', error);
+    console.error("Error setting up tokens for auction:", error);
     throw error;
   }
 };

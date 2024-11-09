@@ -279,41 +279,56 @@ const DutchAuction = () => {
 
   const claimTokens = async () => {
     if (!contracts.auction || !state.user.bidderInfo) return;
-
+  
     setState((prev) => ({
       ...prev,
       ui: { ...prev.ui, loading: true, error: "" },
     }));
-
+  
     try {
+      const tokenContract = new ethers.Contract(
+        process.env.REACT_APP_TOKEN_ADDRESS,
+        ["function balanceOf(address) view returns (uint256)"],
+        contracts.auction.runner.provider
+      );
+  
+      const auctionBalance = await tokenContract.balanceOf(contracts.auction.target);
+      console.log("Auction contract token balance:", ethers.formatEther(auctionBalance));
+  
       const tx = await contracts.auction.claimTokens(state.user.bidderInfo.id);
-
+  
       setState((prev) => ({
         ...prev,
         ui: { ...prev.ui, success: "Processing claim transaction..." },
       }));
-
+  
       await tx.wait();
-
+  
+      // Verify the claim
+      const newBalance = await tokenContract.balanceOf(state.user.account);
+      console.log("New token balance:", ethers.formatEther(newBalance));
+  
       await lookupBidderInfo(state.user.account);
-
+  
       setState((prev) => ({
         ...prev,
         ui: { ...prev.ui, success: "Tokens claimed successfully!" },
       }));
     } catch (error) {
       let errorMessage = "Failed to claim tokens: ";
-
+  
       if (error.message.includes("Auction is not closed")) {
         errorMessage += "Auction must be closed before claiming tokens";
       } else if (error.message.includes("Tokens already claimed")) {
         errorMessage += "Tokens have already been claimed";
       } else if (error.message.includes("Not the bidder")) {
         errorMessage += "You are not the owner of this bid";
+      } else if (error.message.includes("transfer amount exceeds allowance")) {
+        errorMessage += "Token transfer not approved. Please contact admin.";
       } else {
         errorMessage += error.message;
       }
-
+  
       setState((prev) => ({
         ...prev,
         ui: { ...prev.ui, error: errorMessage },
