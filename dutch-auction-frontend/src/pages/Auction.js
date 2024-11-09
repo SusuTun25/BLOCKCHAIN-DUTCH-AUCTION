@@ -28,10 +28,10 @@ const DutchAuction = () => {
     auction: {
       status: "CLOSED",
       currentPrice: "0",
-      timeRemaining: 0,
+      timeRemaining: "0",
       tokensAvailable: "0",
       totalFundsRaised: "0",
-      startTime: 0, 
+      startTime: "0", 
     },
     user: {
       account: "",
@@ -73,15 +73,42 @@ const DutchAuction = () => {
       );
 
       setContracts({ auction: auctionContract, bidder: bidderContract });
+
+      // Get initial values first
+      const [status, startTime, duration, tokens, price, funds] = await Promise.all([
+        auctionContract.getAuctionStatus(),
+        auctionContract.getStartTime(),
+        auctionContract.auctionDuration(),
+        auctionContract.getRemainingTokens(),
+        auctionContract.getCurrentPrice(),
+        auctionContract.getTotalFundsRaised(),
+      ]);
+ 
+      // Calculate initial time remaining
+      const now = Math.floor(Date.now() / 1000);
+      const startTimeNum = Number(startTime);
+      const durationNum = Number(duration);
+      const elapsed = now - startTimeNum;
+      const timeRemaining = elapsed >= durationNum ? 0 : durationNum - elapsed;
+
       setState((prev) => ({
         ...prev,
         user: {
           ...prev.user,
           account: address,
         },
+        auction: {
+          status: ["OPEN", "PAUSED", "CLOSED"][status],
+          currentPrice: ethers.formatEther(price),
+          timeRemaining,
+          tokensAvailable: ethers.formatEther(tokens),
+          totalFundsRaised: ethers.formatEther(funds),
+          startTime: startTimeNum,
+          duration: durationNum,
+        },
+
       }));
 
-      await updateAuctionInfo(auctionContract);
       await lookupBidderInfo(address, auctionContract, bidderContract);
       setupEventListeners(auctionContract);
     } catch (error) {
@@ -163,73 +190,71 @@ const DutchAuction = () => {
     if (!contractToUse) return;
   
     try {
-      const [status, timeRemaining, tokens, price, funds, startTime, duration] = await Promise.all([
+      // Fixed Promise.all to match destructuring
+      const [status, tokens, price, funds] = await Promise.all([
         contractToUse.getAuctionStatus(),
-        contractToUse.getTimeRemaining(),     // Get remaining time from contract
         contractToUse.getRemainingTokens(),
         contractToUse.getCurrentPrice(),
         contractToUse.getTotalFundsRaised(),
-        contractToUse.getStartTime(),         // Get start time from contract
-        contractToUse.auctionDuration()       // Get duration from contract
       ]);
   
       setState(prev => ({
         ...prev,
         auction: {
+          ...prev.auction, // Keep existing values
           status: ["OPEN", "PAUSED", "CLOSED"][status] || "UNKNOWN",
-          currentPrice: ethers.formatEther(price),
-          timeRemaining: Number(timeRemaining),  // Use contract's time remaining
-          tokensAvailable: ethers.formatEther(tokens),
-          totalFundsRaised: ethers.formatEther(funds),
-          startTime: Number(startTime),
-          duration: Number(duration)
+          currentPrice: price ? ethers.formatEther(price) : "0",
+          tokensAvailable: tokens ? ethers.formatEther(tokens) : "0",
+          totalFundsRaised: funds ? ethers.formatEther(funds) : "0",
         }
       }));
   
     } catch (error) {
       console.error("Error updating auction info:", error);
     }
-  };
+};
   
 
   const placeBid = async () => {
     if (!contracts.auction) return;
-
-    setState((prev) => ({
+  
+    setState(prev => ({
       ...prev,
-      ui: { ...prev.ui, loading: true, error: "" },
+      ui: { ...prev.ui, loading: true, error: "" }
     }));
-
+  
     try {
       const currentPrice = await contracts.auction.getCurrentPrice();
       console.log("Current price for bid:", ethers.formatEther(currentPrice));
-
+  
       const tx = await contracts.auction.placeBid({
         value: currentPrice,
-        gasLimit: 300000,
+        gasLimit: 300000
       });
-
-      setState((prev) => ({
+  
+      setState(prev => ({
         ...prev,
-        ui: { ...prev.ui, success: "Processing bid transaction..." },
+        ui: { ...prev.ui, success: "Processing bid transaction..." }
       }));
-
+  
       await tx.wait();
-
-      // Wait a moment for bidder registration
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // Update UI info
-      await updateAuctionInfo();
-      await lookupBidderInfo(state.user.account);
-
-      setState((prev) => ({
+  
+      // Immediately update tokens after bid confirmation
+      const newTokensAvailable = await contracts.auction.getRemainingTokens();
+      setState(prev => ({
         ...prev,
+        auction: {
+          ...prev.auction,
+          tokensAvailable: ethers.formatEther(newTokensAvailable)
+        },
         ui: {
           ...prev.ui,
-          success: "Bid placed successfully!",
-        },
+          success: "Bid placed successfully!"
+        }
       }));
+  
+      await lookupBidderInfo(state.user.account);
+  
     } catch (error) {
       let errorMessage = "Failed to place bid: ";
 
@@ -301,27 +326,45 @@ const DutchAuction = () => {
   // Event Listeners updated to match contract events
   const setupEventListeners = (contract) => {
     if (!contract) return;
-
-    contract.on("BidPlaced", (bidder, bidAmount, tokensAllocated) => {
+  
+    contract.on("BidPlaced", async (bidder, bidAmount, tokensAllocated) => {
       console.log("New bid placed:", {
         bidder,
         bidAmount: ethers.formatEther(bidAmount),
-        tokensAllocated,
+        tokensAllocated: ethers.formatEther(tokensAllocated)
       });
-      updateAuctionInfo();
+  
+      const [remainingTokens, newPrice, newFunds] = await Promise.all([
+        contract.getRemainingTokens(),
+        contract.getCurrentPrice(),
+        contract.getTotalFundsRaised(),
+      ]);
+
+      setState(prev => ({
+        ...prev,
+        auction: {
+          ...prev.auction,
+          tokensAvailable: ethers.formatEther(remainingTokens),
+          currentPrice: ethers.formatEther(newPrice),
+          totalFundsRaised: ethers.formatEther(newFunds),
+        }
+      }));
+  
+  
+      // If this user placed the bid, update their info
       if (bidder.toLowerCase() === state.user.account.toLowerCase()) {
         lookupBidderInfo(state.user.account);
       }
     });
-
+  
     contract.on("AuctionEnded", (totalFundsRaised, unsoldTokens) => {
       console.log("Auction ended:", {
         totalFundsRaised: ethers.formatEther(totalFundsRaised),
-        unsoldTokens: ethers.formatEther(unsoldTokens),
+        unsoldTokens: ethers.formatEther(unsoldTokens)
       });
       updateAuctionInfo();
     });
-
+    
     contract.on("TokensClaimed", (bidderID, bidder, amount) => {
       console.log("Tokens claimed:", {
         bidderID: bidderID.toString(),
@@ -356,34 +399,21 @@ const DutchAuction = () => {
   }, []);
 
   useEffect(() => {
-    if (state.auction.status === "OPEN") {
-      const timer = setInterval(async () => {
-        if (contracts.auction) {
-          try {
-            // Get time remaining directly from contract
-            const timeRemaining = await contracts.auction.getTimeRemaining();
-            
-            setState(prev => ({
-              ...prev,
-              auction: {
-                ...prev.auction,
-                timeRemaining: Number(timeRemaining)
-              }
-            }));
-  
-            // If time is up, check end auction
-            if (Number(timeRemaining) === 0) {
-              await contracts.auction.checkAndEndAuction().catch(console.error);
-            }
-          } catch (error) {
-            console.error("Error updating time:", error);
+    if (state.auction.status === "OPEN" && state.auction.timeRemaining > 0) {
+      const timer = setInterval(() => {
+        setState(prev => ({
+          ...prev,
+          auction: {
+            ...prev.auction,
+            timeRemaining: Math.max(0, prev.auction.timeRemaining - 1)
           }
-        }
+        }));
       }, 1000);
-  
+
       return () => clearInterval(timer);
     }
-  }, [state.auction.status, contracts.auction]);
+  }, [state.auction.status, state.auction.timeRemaining]);
+
 
 
   // Regular price updates

@@ -47,6 +47,7 @@ contract DutchAuction is ReentrancyGuard {
         uint256 amount
     );
     event Debug(string message, uint256 value);
+    event TokensUpdated(uint256 previousAmount, uint256 newAmount);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "Not the owner");
@@ -154,14 +155,20 @@ contract DutchAuction is ReentrancyGuard {
     }
 
     function placeBid() public payable nonReentrant {
+        uint256 previousTokens = totalTokensAvailable;
+
         require(auctionState == AuctionState.OPEN, "Auction is not open");
         uint256 currentPrice = getCurrentPrice();
         require(msg.value >= currentPrice, "Bid below current price");
 
-        uint256 tokensToBuy = msg.value / currentPrice;
-        require(tokensToBuy <= totalTokensAvailable, "Not enough tokens left");
-
-        totalTokensAvailable -= tokensToBuy;
+        uint256 tokensToBuy = (msg.value * 1e18) / currentPrice;
+         if (tokensToBuy < totalTokensAvailable) {
+            totalTokensAvailable -= tokensToBuy;
+        } else {
+            tokensToBuy = totalTokensAvailable;
+            totalTokensAvailable = 0;
+        }
+        
         totalFundsRaised += msg.value;
 
         bidderContract.addBidder(msg.sender, msg.value);
@@ -171,6 +178,7 @@ contract DutchAuction is ReentrancyGuard {
         );
 
         emit BidPlaced(msg.sender, msg.value, tokensToBuy);
+        emit TokensUpdated(previousTokens, totalTokensAvailable);
 
         if (
             totalTokensAvailable == 0 ||
