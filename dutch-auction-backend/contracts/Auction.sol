@@ -20,17 +20,34 @@ contract DutchAuction is ReentrancyGuard {
     uint256 public timeElapsed;
     bool public auctionStarted;
 
-    enum AuctionState { OPEN, PAUSED, CLOSED }
+    enum AuctionState {
+        OPEN,
+        PAUSED,
+        CLOSED
+    }
     AuctionState public auctionState;
 
-    event AuctionStarted(uint256 startTime, uint256 startPrice, uint256 reservePrice, uint256 totalTokens);
+    event AuctionStarted(
+        uint256 startTime,
+        uint256 startPrice,
+        uint256 reservePrice,
+        uint256 totalTokens
+    );
     event AuctionPaused();
     event AuctionResumed();
-    event BidPlaced(address indexed bidder, uint256 bidAmount, uint256 tokensAllocated);
+    event BidPlaced(
+        address indexed bidder,
+        uint256 bidAmount,
+        uint256 tokensAllocated
+    );
     event AuctionEnded(uint256 totalFundsRaised, uint256 unsoldTokens);
-    event TokensClaimed(uint256 indexed bidderID, address indexed bidder, uint256 amount);
+    event TokensClaimed(
+        uint256 indexed bidderID,
+        address indexed bidder,
+        uint256 amount
+    );
     event Debug(string message, uint256 value);
-    
+
     modifier onlyOwner() {
         require(msg.sender == owner, "Not the owner");
         _;
@@ -57,13 +74,25 @@ contract DutchAuction is ReentrancyGuard {
     }
 
     function startAuction() public onlyOwner {
-        require(auctionState == AuctionState.CLOSED, "Auction already started or paused");
+        require(
+            auctionState == AuctionState.CLOSED,
+            "Auction already started or paused"
+        );
         require(!auctionStarted, "Auction already started");
         startTime = block.timestamp;
         auctionState = AuctionState.OPEN;
         auctionStarted = true;
         timeElapsed = 0;
-        emit AuctionStarted(startTime, startPrice, reservePrice, totalTokensAvailable);
+        emit AuctionStarted(
+            startTime,
+            startPrice,
+            reservePrice,
+            totalTokensAvailable
+        );
+    }
+
+    function getStartTime() external view returns (uint256) {
+        return startTime;
     }
 
     function incrementTime(uint256 secondsToAdd) external {
@@ -93,11 +122,14 @@ contract DutchAuction is ReentrancyGuard {
         require(auctionStarted, "Auction has not started");
 
         uint256 elapsedTime = block.timestamp - startTime;
-        emit Debug("Elapsed time", elapsedTime); // Emit the elapsed time for debugging
+        emit Debug("Elapsed time", elapsedTime);
 
         if (elapsedTime >= auctionDuration) {
-            emit Debug("Auction duration met. Ending auction.", auctionDuration);
-            endAuction(); // Call endAuction if the auction duration has passed
+            emit Debug(
+                "Auction duration met. Ending auction.",
+                auctionDuration
+            );
+            endAuction();
         } else {
             emit Debug("Auction still ongoing", auctionDuration - elapsedTime);
         }
@@ -115,7 +147,10 @@ contract DutchAuction is ReentrancyGuard {
         }
         uint256 elapsedMinutes = (block.timestamp - startTime) / 60;
         uint256 priceDecrease = elapsedMinutes * priceDecrement;
-        return (startPrice > priceDecrease) ? (startPrice - priceDecrease) : reservePrice;
+        return
+            (startPrice > priceDecrease)
+                ? (startPrice - priceDecrease)
+                : reservePrice;
     }
 
     function placeBid() public payable nonReentrant {
@@ -130,28 +165,34 @@ contract DutchAuction is ReentrancyGuard {
         totalFundsRaised += msg.value;
 
         bidderContract.addBidder(msg.sender, msg.value);
-        bidderContract.setTokensPurchased(bidderContract.totalBidders() - 1, tokensToBuy);
+        bidderContract.setTokensPurchased(
+            bidderContract.totalBidders() - 1,
+            tokensToBuy
+        );
 
         emit BidPlaced(msg.sender, msg.value, tokensToBuy);
 
-        if (totalTokensAvailable == 0 || block.timestamp >= startTime + auctionDuration) {
+        if (
+            totalTokensAvailable == 0 ||
+            block.timestamp >= startTime + auctionDuration
+        ) {
             endAuction();
         }
     }
 
-    function endAuction() public onlyOwner {
+    function endAuction() internal {
         emit Debug("Starting endAuction", totalTokensAvailable);
 
         auctionState = AuctionState.CLOSED;
         uint256 unsoldTokens = totalTokensAvailable;
         emit Debug("Auction state set to CLOSED", uint256(auctionState));
 
-        // Attempt to transfer funds to the owner
+        // Transfer funds to owner
         bool transferSuccess = payable(owner).send(totalFundsRaised);
         require(transferSuccess, "Owner fund transfer failed");
         emit Debug("Owner funds transferred", totalFundsRaised);
 
-        // Attempt to transfer unsold tokens to the owner, if any
+        // Transfer unsold tokens to owner
         if (unsoldTokens > 0) {
             emit Debug("Transferring unsold tokens to owner", unsoldTokens);
             bool tokenTransferSuccess = token.transfer(owner, unsoldTokens);
@@ -161,29 +202,32 @@ contract DutchAuction is ReentrancyGuard {
         emit AuctionEnded(totalFundsRaised, unsoldTokens);
     }
 
-    function sendTokens() public onlyOwner {
-        require(auctionState == AuctionState.CLOSED, "Auction has not ended"); // Ensure auction is closed
+    function sendTokens() public {
+        require(auctionState == AuctionState.CLOSED, "Auction has not ended");
 
         uint256 totalBidders = bidderContract.totalBidders();
         emit Debug("Total Bidders", totalBidders);
 
         for (uint i = 0; i < totalBidders; i++) {
-            // Retrieve bidder info from the Bidder contract
             Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(i);
             emit Debug("Processing Bidder", i);
-            
+
             if (bidder.tokensPurchased > 0 && !bidder.tokenSent) {
                 uint256 tokensOwed = bidder.tokensPurchased;
                 emit Debug("Tokens to be sent", tokensOwed);
-                emit Debug("Bidder wallet address", uint256(uint160(bidder.walletAddress))); // Log address as uint for debugging
+                emit Debug(
+                    "Bidder wallet address",
+                    uint256(uint160(bidder.walletAddress))
+                );
 
                 bidderContract.markTokensAsClaimed(i);
-   
-                // Transfer tokens to the bidder
-                bool transferSuccess = token.transfer(bidder.walletAddress, tokensOwed);
+
+                bool transferSuccess = token.transfer(
+                    bidder.walletAddress,
+                    tokensOwed
+                );
                 require(transferSuccess, "Token transfer failed");
 
-                // Emit an event for successful token transfer
                 emit TokensClaimed(i, bidder.walletAddress, tokensOwed);
             } else {
                 if (bidder.tokensPurchased == 0) {
@@ -202,7 +246,9 @@ contract DutchAuction is ReentrancyGuard {
     }
 
     function withdrawRefund(uint256 bidderID) public nonReentrant {
-        Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(bidderID);
+        Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(
+            bidderID
+        );
         uint256 refundAmount = bidder.refundEth;
         require(refundAmount > 0, "No refund available");
 
@@ -213,15 +259,20 @@ contract DutchAuction is ReentrancyGuard {
 
     function claimTokens(uint256 bidderID) public nonReentrant {
         require(auctionState == AuctionState.CLOSED, "Auction is not closed");
-        
-        Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(bidderID);
+
+        Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(
+            bidderID
+        );
         require(msg.sender == bidder.walletAddress, "Not the bidder");
         require(!bidder.tokenSent, "Tokens already claimed");
         require(bidder.tokensPurchased > 0, "No tokens to claim");
 
         bidderContract.markTokensAsClaimed(bidderID);
-        
-        bool transferSuccess = token.transfer(msg.sender, bidder.tokensPurchased);
+
+        bool transferSuccess = token.transfer(
+            msg.sender,
+            bidder.tokensPurchased
+        );
         require(transferSuccess, "Token transfer failed");
 
         emit TokensClaimed(bidderID, msg.sender, bidder.tokensPurchased);
@@ -239,15 +290,17 @@ contract DutchAuction is ReentrancyGuard {
         return totalFundsRaised;
     }
 
-    function getBidderInfo(uint256 bidderID) public view returns (Bidder.BidderInfo memory) {
+    function getBidderInfo(
+        uint256 bidderID
+    ) public view returns (Bidder.BidderInfo memory) {
         return bidderContract.getBidderInfo(bidderID);
     }
 
     function getBidderID(address bidderAddress) public view returns (uint256) {
         uint256 totalBids = bidderContract.totalBidders();
-        for(uint256 i = 0; i < totalBids; i++) {
+        for (uint256 i = 0; i < totalBids; i++) {
             Bidder.BidderInfo memory bidder = bidderContract.getBidderInfo(i);
-            if(bidder.walletAddress == bidderAddress) {
+            if (bidder.walletAddress == bidderAddress) {
                 return i;
             }
         }
