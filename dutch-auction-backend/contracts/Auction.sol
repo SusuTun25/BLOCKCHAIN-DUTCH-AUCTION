@@ -172,10 +172,8 @@ contract DutchAuction is ReentrancyGuard {
         totalFundsRaised += msg.value;
 
         bidderContract.addBidder(msg.sender, msg.value);
-        bidderContract.setTokensPurchased(
-            bidderContract.totalBidders() - 1,
-            tokensToBuy
-        );
+        uint256 bidderID = getBidderID(msg.sender);
+        bidderContract.setTokensPurchased(bidderID,tokensToBuy);
 
         emit BidPlaced(msg.sender, msg.value, tokensToBuy);
         emit TokensUpdated(previousTokens, totalTokensAvailable);

@@ -49,7 +49,7 @@ contract Bidder {
      */
     function setTokensPurchased(uint256 _bidderID, uint256 _tokensPurchased) public {
         require(_bidderID < totalBidders, "Invalid bidder ID");
-        bidders[_bidderID].tokensPurchased = _tokensPurchased;
+        bidders[_bidderID].tokensPurchased += _tokensPurchased;
         emit TokensAllocated(_bidderID, _tokensPurchased);
     }
 
