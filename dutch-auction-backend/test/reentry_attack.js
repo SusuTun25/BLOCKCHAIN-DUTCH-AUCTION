@@ -114,6 +114,8 @@ describe("DutchAuction Reentrancy Tests", function () {
         maliciousContract.connect(attacker).attackClaimTokens(bidderId)
       ).to.be.revertedWith("Tokens already claimed");
 
+      console.log("Test for <Tokens already claimed> complete");
+
     });
   });
 
