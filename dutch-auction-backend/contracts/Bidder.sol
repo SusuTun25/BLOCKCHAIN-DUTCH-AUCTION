@@ -13,6 +13,7 @@ contract Bidder {
     }
 
     mapping(uint256 => BidderInfo) public bidders;
+    mapping(address => uint256) public walletToBidderID;
     uint256 public totalBidders;
 
     event BidderAdded(uint256 indexed bidderID, address walletAddress, uint256 bidValue);
@@ -49,7 +50,7 @@ contract Bidder {
      */
     function setTokensPurchased(uint256 _bidderID, uint256 _tokensPurchased) public {
         require(_bidderID < totalBidders, "Invalid bidder ID");
-        bidders[_bidderID].tokensPurchased = _tokensPurchased;
+        bidders[_bidderID].tokensPurchased += _tokensPurchased;
         emit TokensAllocated(_bidderID, _tokensPurchased);
     }
 
@@ -78,4 +79,5 @@ contract Bidder {
         require(_bidderID < totalBidders, "Invalid bidder ID");
         bidders[_bidderID].tokenSent = true;
     }
+
 }

@@ -83,7 +83,7 @@ async function main() {
     const DutchAuction = await hre.ethers.getContractFactory("DutchAuction");
     const startPrice = hre.ethers.parseEther("1"); // 1 ETH
     const reservePrice = hre.ethers.parseEther("0.1"); // 0.1 ETH
-    const auctionDuration = 1200;
+    const auctionDuration = 5000;
     const totalTokens = hre.ethers.parseUnits("10", 18); // 10 tokens
     const priceDecrement = hre.ethers.parseEther("0.05"); // 0.05 ETH per minute
 
